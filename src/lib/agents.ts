@@ -42,7 +42,7 @@ export function validateChanges(value: unknown, request: GenerationRequest): Cha
 }
 
 function prompt(request: GenerationRequest): string {
-	return `${instructions}\n\nInput data (JSON):\n${JSON.stringify({ evidence: request.evidence, existingEntries: request.existingEntries, packageName: request.packageName, version: request.version })}`
+	return `${instructions}\n\nInput data (JSON):\n${JSON.stringify({ evidence: request.evidence, existingEntries: request.existingEntries, packageName: request.packageName, scope: request.scope ?? 'package', version: request.version })}`
 }
 
 /** Create an adapter for an installed CLI using its existing authentication. */

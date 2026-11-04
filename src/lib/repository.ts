@@ -1,5 +1,6 @@
 import { glob, readFile, realpath } from 'node:fs/promises'
 import path from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import semver from 'semver'
 import { parse } from 'yaml'
 import { z } from 'zod'
@@ -43,6 +44,25 @@ export async function manifestAt(root: string, directory: string, ref: string) {
 	return text === '' ? undefined : manifestSchema.parse(JSON.parse(text))
 }
 
+/** Recognize release bookkeeping without dropping meaningful manifest changes. */
+export async function isVersionOnlyChange(
+	root: string,
+	file: string,
+	beforeRef: string,
+	afterRef: string,
+): Promise<boolean> {
+	const before = await git(root, ['show', `${beforeRef}:${file}`], true)
+	const after = await git(root, ['show', `${afterRef}:${file}`], true)
+	if (before === '' || after === '') {
+		return false
+	}
+
+	const schema = z.record(z.string(), z.unknown())
+	const oldValue = schema.parse(JSON.parse(before))
+	const newValue = schema.parse(JSON.parse(after))
+	return isDeepStrictEqual({ ...oldValue, version: undefined }, { ...newValue, version: undefined })
+}
+
 /**
  * Discover a complete Git checkout and its explicitly declared workspace
  * packages.
@@ -51,7 +71,8 @@ export async function inspectRepository(
 	cwd: string,
 	config: Pick<Config, 'exclude' | 'packages'> = {},
 ): Promise<Repository> {
-	const root = await git(cwd, ['rev-parse', '--show-toplevel'])
+	const gitRoot = await git(cwd, ['rev-parse', '--show-toplevel'])
+	const root = await realpath(gitRoot)
 	if ((await git(root, ['rev-parse', '--is-shallow-repository'])) === 'true') {
 		throw new Error(
 			'Release history is incomplete in this shallow checkout. Fetch the full history and tags before running chagent.',
@@ -254,7 +275,9 @@ async function workspacePackages(
 			continue
 		}
 
-		directories.push(path.relative(root, path.join(entry.parentPath, entry.name)))
+		directories.push(
+			path.relative(root, path.join(entry.parentPath, entry.name)).split(path.sep).join('/'),
+		)
 	}
 
 	const packages: PackageInfo[] = []
@@ -341,10 +364,12 @@ async function isPendingRelease(
 	const currentVersion = pkg.version ?? (pkg.directory === '.' ? context?.version : undefined)
 	const committed = await manifestAt(repository.root, pkg.directory, repository.head)
 	const versionChanged = currentVersion !== undefined && currentVersion !== committed?.version
+	const parent = await manifestAt(repository.root, pkg.directory, repository.head + '^')
+	const committedBump = parent?.version !== undefined && parent.version !== committed?.version
 	return (
 		currentVersion !== undefined &&
 		semver.valid(currentVersion) !== null &&
 		(latest === undefined || semver.gt(currentVersion, latest.version)) &&
-		(versionChanged || context !== undefined)
+		(versionChanged || context !== undefined || committedBump)
 	)
 }

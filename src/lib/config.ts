@@ -1,5 +1,4 @@
 import { cosmiconfig } from 'cosmiconfig'
-import { TypeScriptLoader as typescriptLoader } from 'cosmiconfig-typescript-loader'
 import { z } from 'zod'
 import type { Config } from './types'
 
@@ -24,7 +23,6 @@ export function defineConfig(config: Config): Config {
 /** Load configuration from the repository root or an explicitly selected file. */
 export async function loadConfig(root: string, file?: string): Promise<Config> {
 	const explorer = cosmiconfig('chagent', {
-		loaders: { '.ts': typescriptLoader() },
 		searchPlaces: [
 			'chagent.config.ts',
 			'chagent.config.mjs',

@@ -1,8 +1,10 @@
+import { realpath } from 'node:fs/promises'
 import path from 'node:path'
 import semver from 'semver'
 import { z } from 'zod'
 import type {
 	AgentAdapter,
+	Category,
 	Change,
 	ChangelogPlan,
 	Evidence,
@@ -22,6 +24,7 @@ import { instructionVersion } from './instructions'
 import { log } from './log'
 import { git, runCommand } from './process'
 import { hasNodeException, inspectRepository, resolveReleases } from './repository'
+import { categories } from './types'
 
 const checkpointSchema = z.object({
 	baseRef: z.string(),
@@ -29,6 +32,11 @@ const checkpointSchema = z.object({
 	head: z.string(),
 	path: z.string(),
 })
+const HEADING_PREFIX = /^##\s+/v
+const INLINE_LINK = /\[([^\]]+)\]\([^\)]*\)/gv
+const ANCHOR_PUNCTUATION = /[^\p{L}\p{N}_\s\-]/gv
+const ANCHOR_SPACE = /\s/gv
+const LINE_BOUNDARY = /(?<=\n)/v
 type Context = {
 	agent: AgentAdapter
 	cacheDirectory?: string
@@ -107,6 +115,7 @@ async function summarize(
 			existingEntries: mergeChanges(existingEntries, changes),
 			model: options.model,
 			packageName: pkg.name,
+			scope: pkg.directory === '.' && repository.packages.length > 0 ? 'repository' : 'package',
 			signal: options.signal,
 			timeoutMs: options.timeoutMs ?? 1_200_000,
 			version: release.version,
@@ -239,6 +248,8 @@ async function generatePackage(
 
 	const exception = await hasNodeException(repository, pkg, releases)
 	const after = updateMarkdown(file.content, entries, exception, repository.github)
+	addAnchors(summaries, after)
+
 	if (after !== file.content) {
 		plan.files.push({ after, before: file.content, path: file.path })
 	}
@@ -259,12 +270,29 @@ async function generatePackage(
 function packageLink(repository: Repository, summary: ReleaseSummary): string {
 	const relative = path.relative(repository.root, summary.changelogPath).split(path.sep).join('/')
 	const anchor =
-		summary.version === 'Unreleased'
+		summary.anchor ??
+		(summary.version === 'Unreleased'
 			? 'unreleased'
-			: `${summary.version.replaceAll('.', '')}${summary.date === undefined ? '' : '--' + summary.date}`
+			: `${summary.version.replaceAll('.', '')}${summary.date === undefined ? '' : '---' + summary.date}`)
 	return repository.github === undefined
 		? `${relative}#${anchor}`
 		: `https://github.com/${repository.github}/blob/HEAD/${relative}#${anchor}`
+}
+
+function addAnchors(summaries: ReleaseSummary[], content: string): void {
+	const { sections } = parseChangelog(content)
+	for (const summary of summaries) {
+		const section = sections.find((item) => item.version === summary.version)
+		if (section !== undefined) {
+			summary.anchor = section.heading
+				.trim()
+				.replace(HEADING_PREFIX, '')
+				.replaceAll(INLINE_LINK, '$1')
+				.toLowerCase()
+				.replaceAll(ANCHOR_PUNCTUATION, '')
+				.replaceAll(ANCHOR_SPACE, '-')
+		}
+	}
 }
 
 function aggregateChanges(repository: Repository, summaries: ReleaseSummary[]): Change[] {
@@ -293,6 +321,55 @@ function aggregateChanges(repository: Repository, summaries: ReleaseSummary[]): 
 	return changes
 }
 
+function promotePackageDraft(
+	content: string | undefined,
+	summary: ReleaseSummary,
+	repository: Repository,
+): { changes: Change[]; content: string | undefined } {
+	const changes: Change[] = []
+	const draft = parseChangelog(content ?? '').sections.find(
+		(section) => section.version === 'Unreleased',
+	)
+	if (content === undefined || draft === undefined) {
+		return { changes, content }
+	}
+
+	const source = `[${summary.packageName} Unreleased](`
+	const target = `[${summary.packageName} ${summary.version}](${packageLink(repository, summary)})`
+	const remaining: string[] = []
+	let category: Category = 'Changed'
+	for (const line of draft.body.split(LINE_BOUNDARY)) {
+		category = categories.find((item) => line.trimEnd() === `### ${item}`) ?? category
+		const breaking = line.startsWith('- **Breaking:** ')
+		const prefix = breaking ? '- **Breaking:** ' : '- '
+		const end = line.indexOf(')', prefix.length + source.length)
+		if (end === -1 || !line.startsWith(prefix + source)) {
+			remaining.push(line)
+			continue
+		}
+
+		changes.push({
+			breaking,
+			category,
+			description: target + line.slice(end + 1).trimEnd(),
+			sources: [],
+		})
+	}
+
+	if (changes.length === 0) {
+		return { changes, content }
+	}
+
+	const meaningful = remaining.some(
+		(line) => line.trim() !== '' && categories.every((item) => line.trimEnd() !== `### ${item}`),
+	)
+	const replacement = meaningful ? draft.heading + remaining.join('') : ''
+	return {
+		changes,
+		content: content.slice(0, draft.start) + replacement + content.slice(draft.end),
+	}
+}
+
 async function aggregateIndependent(
 	context: Context,
 	summaries: ReleaseSummary[],
@@ -300,6 +377,7 @@ async function aggregateIndependent(
 ): Promise<void> {
 	const { plan, repository } = context
 	const file = await findChangelog(repository.root)
+	let { content } = file
 	const parsed = parseChangelog(file.content ?? '')
 	const known = new Set(parsed.sections.map((section) => section.version))
 	const entries: Parameters<typeof updateMarkdown>[1] = []
@@ -325,8 +403,10 @@ async function aggregateIndependent(
 			continue
 		}
 
+		const promoted = promotePackageDraft(content, summary, repository)
+		content = promoted.content
 		entries.push({
-			changes: aggregateChanges(repository, [summary]),
+			changes: [...promoted.changes, ...aggregateChanges(repository, [summary])],
 			release: { date: summary.date, ref: summary.ref, tag: summary.tag, version: label },
 		})
 	}
@@ -341,7 +421,9 @@ async function aggregateIndependent(
 	const ancestors = await git(repository.root, ['rev-list', '--topo-order', repository.head])
 	const base = ancestors.split('\n').find((ref) => releaseRefs.has(ref))
 	const draftRelease: Release = { previousRef: base, ref: repository.head, version: 'Unreleased' }
-	const draft = parsed.sections.find((section) => section.version === 'Unreleased')?.body
+	const draft = parseChangelog(content ?? '').sections.find(
+		(section) => section.version === 'Unreleased',
+	)?.body
 	const from = await incrementalBase(context, file.path, file.content, draftRelease)
 	unreleased.push(
 		...(await summarize(context, repository.rootPackage, draftRelease, draft ?? '', from, true)),
@@ -349,12 +431,12 @@ async function aggregateIndependent(
 	if (unreleased.length > 0) {
 		entries.push({
 			changes: unreleased,
-			existingBody: parsed.sections.find((section) => section.version === 'Unreleased')?.body,
+			existingBody: draft,
 			release: { ref: repository.head, version: 'Unreleased' },
 		})
 	}
 
-	const after = updateMarkdown(file.content, entries, exception, repository.github)
+	const after = updateMarkdown(content, entries, exception, repository.github)
 	if (after !== file.content) {
 		plan.files.push({ after, before: file.content, path: file.path })
 	}
@@ -371,7 +453,8 @@ async function aggregateIndependent(
 
 /** Generate reviewable edits from Git history without changing tracked files. */
 export async function generateChangelog(options: GenerateOptions = {}): Promise<ChangelogPlan> {
-	const root = await git(options.cwd ?? process.cwd(), ['rev-parse', '--show-toplevel'])
+	const gitRoot = await git(options.cwd ?? process.cwd(), ['rev-parse', '--show-toplevel'])
+	const root = await realpath(gitRoot)
 	const config = await loadConfig(root, options.configFile)
 	const selected = Object.fromEntries(
 		Object.entries(options as Record<string, unknown>).filter(([, value]) => value !== undefined),
@@ -415,9 +498,15 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 			resolved.release,
 		)
 		const shared = rootReleases.some((release) => release.version !== 'Unreleased')
+		const rootFile = await findChangelog(root)
+		const needsPackageHistory =
+			!shared ||
+			missingReleases(rootReleases, rootFile.content).some(
+				(release) => release.version !== 'Unreleased',
+			)
 		let exception = false
 		for (const pkg of repository.packages) {
-			const result = await generatePackage(context, pkg, !shared)
+			const result = await generatePackage(context, pkg, needsPackageHistory)
 			exception ||= result.exception
 			plan.releases.push(...result.summaries)
 		}

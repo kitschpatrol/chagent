@@ -127,4 +127,22 @@ describe('release integration', () => {
 		await expect(amendRelease(plan)).rejects.toThrow('exactly one parent')
 		await expect(readFile(path.join(root, 'changelog.md'))).rejects.toThrow()
 	})
+
+	it('refuses to rewrite a release already advertised by a remote', async () => {
+		const root = await createRepository()
+		directories.push(root)
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, {
+			'package.json': '{"name":"example","version":"1.0.1","engines":{"node":">=18"}}',
+		})
+		await commit(root, 'Release: 1.0.1')
+		await git(root, ['tag', 'v1.0.1'])
+		const remote = path.join(root, 'remote.git')
+		await git(root, ['clone', '--bare', root, remote])
+		await git(root, ['remote', 'add', 'origin', remote])
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		await expect(amendRelease(plan)).rejects.toThrow('already advertised')
+		expect(await git(root, ['rev-parse', 'HEAD'])).toBe(plan.head)
+		await expect(readFile(path.join(root, 'changelog.md'))).rejects.toThrow()
+	})
 })

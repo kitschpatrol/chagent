@@ -30,6 +30,7 @@ export type GenerationRequest = {
 	existingEntries: string
 	model?: string
 	packageName: string
+	scope?: 'package' | 'repository'
 	signal?: AbortSignal
 	timeoutMs: number
 	version: string
@@ -120,6 +121,8 @@ type Checkpoint = {
 }
 
 export type ReleaseSummary = {
+	/** Anchor of the actual package heading, including preserved historical dates. */
+	anchor?: string
 	changelogPath: string
 	changes: Change[]
 	date?: string

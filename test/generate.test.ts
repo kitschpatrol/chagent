@@ -170,4 +170,55 @@ describe('generation and writing', () => {
 		})
 		expect(awaitedResult3.files).toEqual([])
 	})
+
+	it('backfills root links without rewriting existing package history', async () => {
+		const history =
+			changelogHeader + '\n## [1.0.0] - 2026-01-01\n\n### Added\n\n- Handwritten package history.\n'
+		const root = await createRepository({
+			'packages/a/changelog.md': history,
+			'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',
+			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+		})
+		directories.push(root)
+		await git(root, ['tag', 'v1.0.0'])
+		const agent = fixtureAgent()
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		expect(plan.files).toHaveLength(1)
+		expect(plan.files[0]?.after).toContain('packages/a/changelog.md#100---2026-01-01')
+		expect(await readFile(path.join(root, 'packages/a/changelog.md'), 'utf8')).toBe(history)
+		expect(agent.generate.mock.calls.some(([request]) => request.scope === 'repository')).toBe(true)
+	})
+
+	it('promotes independent package summaries while preserving root draft edits', async () => {
+		const root = await createRepository({
+			'packages/a/index.js': 'export const answer = 42\n',
+			'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',
+			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+		})
+		directories.push(root)
+		await git(root, ['tag', '@example/a@1.0.0'])
+		const agent = fixtureAgent()
+		await writeChangelog(await generateChangelog({ agent, cwd: root, github: false }))
+		await writeFiles(root, { 'packages/a/index.js': 'export const answer = 43\n' })
+		await commit(root, 'Improve the package.')
+		const draft = await generateChangelog({ agent, cwd: root, github: false })
+		const rootDraft = draft.files.find((file) => file.path === path.join(root, 'changelog.md'))!
+		rootDraft.after = rootDraft.after
+			.replace('## Unreleased\n', '## Unreleased\n\nA root note.\n')
+			.replace('Improve @example/a in Unreleased.', 'Reviewed package fix.')
+		await writeChangelog(draft)
+		await writeFiles(root, { 'packages/a/package.json': '{"name":"@example/a","version":"1.0.1"}' })
+		await commit(root, 'Release: 1.0.1')
+		await git(root, ['tag', '@example/a@1.0.1'])
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		const rootFile = plan.files.find((file) => file.path === path.join(root, 'changelog.md'))!
+		const { sections } = parseChangelog(rootFile.after)
+		expect(sections.find((section) => section.version === '@example/a@1.0.1')?.body).toContain(
+			'Reviewed package fix.',
+		)
+		expect(sections.find((section) => section.version === 'Unreleased')?.body).toContain(
+			'A root note.',
+		)
+		expect(rootFile.after).not.toContain('@example/a Unreleased')
+	})
 })

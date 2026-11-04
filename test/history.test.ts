@@ -50,6 +50,10 @@ describe('release history', () => {
 			pending: true,
 			version: '1.0.1',
 		})
+		await commit(root, 'Release: 1.0.1')
+		repository = await inspectRepository(root)
+		const committed = await resolveReleases(repository, repository.rootPackage, {})
+		expect(committed.at(-1)).toMatchObject({ pending: true, version: '1.0.1' })
 	})
 
 	it('does not treat Node upgrades in major releases as exceptions', async () => {
@@ -96,5 +100,47 @@ describe('release history', () => {
 		expect(repository.packages.map((pkg) => pkg.name)).toEqual(['@example/a', '@example/b'])
 		const awaitedResult4 = await resolveReleases(repository, repository.packages[1]!, {})
 		expect(awaitedResult4.map((release) => release.version)).toEqual(['2.0.0'])
+	})
+
+	it('excludes version-only release commits from PR enrichment evidence', async () => {
+		const root = await createRepository()
+		directories.push(root)
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'index.js': 'export const answer = 45\n' })
+		await commit(root, 'Improve the answer.')
+		const sourceCommit = await git(root, ['rev-parse', 'HEAD'])
+		await writeFiles(root, {
+			'changelog.md': '# Changelog\n\nDo not repeat generated descriptions.\n',
+			'package.json': '{"name":"example","version":"1.0.1","engines":{"node":">=18"}}',
+		})
+		await commit(root, 'Release: 1.0.1')
+		await git(root, ['tag', 'v1.0.1'])
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		const evidence = await collectEvidence(repository, repository.rootPackage, releases[1]!)
+		expect(evidence.filter((item) => item.kind === 'commit').map((item) => item.id)).toEqual([
+			sourceCommit,
+		])
+	})
+
+	it('uses workspace dependency relationships from each historical release', async () => {
+		const root = await createRepository({
+			'packages/a/package.json':
+				'{"name":"@example/a","version":"1.0.0","dependencies":{"@example/b":"workspace:*"}}',
+			'packages/b/index.js': 'export const shared = 1\n',
+			'packages/b/package.json': '{"name":"@example/b","version":"1.0.0"}',
+			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+		})
+		directories.push(root)
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, {
+			'packages/a/package.json': '{"name":"@example/a","version":"2.0.0"}',
+		})
+		await commit(root, 'Remove the shared dependency.')
+		const repository = await inspectRepository(root)
+		const pkg = repository.packages[0]!
+		const releases = await resolveReleases(repository, pkg, {})
+		const evidence = await collectEvidence(repository, pkg, releases[0]!)
+		expect(evidence.some((item) => item.id === 'diff:packages/b/index.js')).toBe(true)
 	})
 })

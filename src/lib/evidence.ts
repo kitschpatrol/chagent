@@ -1,6 +1,7 @@
 import path from 'node:path'
 import type { Evidence, PackageInfo, Release, Repository } from './types'
 import { git, runCommand } from './process'
+import { isVersionOnlyChange, manifestAt } from './repository'
 
 const GENERATED_PATH = /(?:^|\/)(?:changelog(?:\.md)?|node_modules|dist|build|coverage)(?:\/|$)/iv
 const LOCKFILE_PATH = /(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?)$/v
@@ -9,26 +10,45 @@ function ignored(file: string): boolean {
 	return GENERATED_PATH.test(file) || LOCKFILE_PATH.test(file)
 }
 
-function scopes(repository: Repository, pkg: PackageInfo): string[] {
+async function scopes(repository: Repository, pkg: PackageInfo, ref: string): Promise<string[]> {
 	if (pkg.directory === '.') {
 		return ['.']
 	}
 
 	const directories = new Set([pkg.directory])
-	const visit = (current: PackageInfo) => {
-		for (const name of current.dependencies) {
+	const visit = async (current: PackageInfo) => {
+		const manifest = await manifestAt(repository.root, current.directory, ref)
+		const dependencies = Object.keys({
+			...manifest?.dependencies,
+			...manifest?.peerDependencies,
+			...manifest?.optionalDependencies,
+		})
+		for (const name of dependencies) {
 			const dependency = repository.packages.find((candidate) => candidate.name === name)
 			if (!dependency || directories.has(dependency.directory)) {
 				continue
 			}
 
 			directories.add(dependency.directory)
-			visit(dependency)
+			await visit(dependency)
 		}
 	}
 
-	visit(pkg)
+	await visit(pkg)
 	return [...directories]
+}
+
+async function hasSourceChanges(root: string, files: string[], commit: string): Promise<boolean> {
+	for (const file of files) {
+		if (
+			path.posix.basename(file) !== 'package.json' ||
+			!(await isVersionOnlyChange(root, file, commit + '^', commit))
+		) {
+			return true
+		}
+	}
+
+	return false
 }
 
 /** Collect source changes, excluding generated notes and release-only commits. */
@@ -39,7 +59,7 @@ export async function collectEvidence(
 	excludeDirectories: string[] = [],
 ): Promise<Evidence[]> {
 	const { root } = repository
-	const directories = scopes(repository, pkg)
+	const directories = await scopes(repository, pkg, release.ref)
 	const paths = [
 		...directories.map((directory) => `:(literal)${directory}`),
 		...excludeDirectories.map((directory) => `:(exclude,literal)${directory}`),
@@ -82,7 +102,10 @@ export async function collectEvidence(
 			...paths,
 		])
 		const files = awaitedResult3.split('\0').filter((file) => file !== '' && !ignored(file))
-		if (files.every((file) => !changed.includes(file))) {
+		if (
+			files.every((file) => !changed.includes(file)) ||
+			!(await hasSourceChanges(root, files, commit))
+		) {
 			continue
 		}
 

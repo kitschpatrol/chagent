@@ -1,8 +1,7 @@
 import path from 'node:path'
-import { isDeepStrictEqual } from 'node:util'
 import type { ChangelogPlan } from './types'
 import { git, runCommand } from './process'
-import { inspectRepository, manifestAt } from './repository'
+import { inspectRepository, isVersionOnlyChange, manifestAt } from './repository'
 import { writeChangelog } from './write'
 
 type Tag = { contents?: string; name: string; object: string }
@@ -103,8 +102,7 @@ async function inspectRelease(plan: ChangelogPlan): Promise<Tag[]> {
 		}
 
 		const object = await git(root, ['rev-parse', `refs/tags/${name}`])
-		const type = await git(root, ['cat-file', '-t', object])
-		const contents = type === 'tag' ? await git(root, ['cat-file', '-p', object]) : undefined
+		const contents = await tagContents(root, object)
 		if (contents !== undefined && SIGNATURE.test(contents)) {
 			throw new Error(
 				`Tag ${name} is signed. Use the bumpp hook before tagging, or re-sign this release manually.`,
@@ -118,6 +116,15 @@ async function inspectRelease(plan: ChangelogPlan): Promise<Tag[]> {
 	return tags
 }
 
+async function tagContents(root: string, object: string): Promise<string | undefined> {
+	if ((await git(root, ['cat-file', '-t', object])) !== 'tag') {
+		return undefined
+	}
+
+	const result = await runCommand('git', ['cat-file', '-p', object], { cwd: root })
+	return result.stdout
+}
+
 /**
  * Explicitly amend an unpublished version-only release and its matching local
  * tags.
@@ -127,6 +134,10 @@ export async function amendRelease(plan: ChangelogPlan): Promise<string> {
 	const files = await writeChangelog(plan)
 	if (files.length === 0) {
 		return plan.head
+	}
+
+	if ((await git(plan.root, ['rev-parse', 'HEAD'])) !== plan.head) {
+		throw new Error('HEAD changed while writing changelogs; refusing to amend.')
 	}
 
 	const originalCommit = await git(plan.root, ['cat-file', '-p', plan.head])
@@ -146,8 +157,7 @@ export async function amendRelease(plan: ChangelogPlan): Promise<string> {
 		for (const tag of tags) {
 			let object = amended
 			if (tag.contents !== undefined) {
-				const contents =
-					tag.contents.replace(`object ${plan.head}`, () => `object ${amended}`) + '\n'
+				const contents = tag.contents.replace(`object ${plan.head}`, () => `object ${amended}`)
 				const result = await runCommand('git', ['mktag'], { cwd: plan.root, input: contents })
 				object = result.stdout.trim()
 			}
@@ -191,20 +201,7 @@ async function assertVersionBump(root: string, head: string): Promise<void> {
 			throw new Error(`No verifiable version bump in ${file}.`)
 		}
 
-		const oldValue: unknown = JSON.parse(await git(root, ['show', `${head}^:${file}`]))
-		const newValue: unknown = JSON.parse(await git(root, ['show', `${head}:${file}`]))
-		if (
-			typeof oldValue !== 'object' ||
-			oldValue === null ||
-			typeof newValue !== 'object' ||
-			newValue === null
-		) {
-			throw new Error(`Invalid release manifest: ${file}`)
-		}
-
-		if (
-			!isDeepStrictEqual({ ...oldValue, version: undefined }, { ...newValue, version: undefined })
-		) {
+		if (!(await isVersionOnlyChange(root, file, head + '^', head))) {
 			throw new Error(
 				`The release changes more than the version in ${file}. Use the bumpp hook instead.`,
 			)

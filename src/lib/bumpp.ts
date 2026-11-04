@@ -5,7 +5,7 @@ import { git } from './process'
 import { reviewChangelog } from './review'
 import { writeChangelog } from './write'
 
-const TAG_TOKEN = /\{(version|oldVersion|major|minor|patch|date)\}/gv
+const TAG_TOKEN = /\{(version|oldVersion|tag|releaseType|major|minor|patch|date)\}/gv
 
 type ExecuteHook = Exclude<NonNullable<VersionBumpOptions['execute']>, string>
 export type BumppHookOptions = Omit<GenerateOptions, 'cwd' | 'release'> & {
@@ -17,21 +17,27 @@ function tagName(
 	template: string | undefined,
 	version: string,
 	oldVersion: string,
+	releaseType = '',
 ): string | undefined {
 	if (template === undefined) {
 		return undefined
 	}
 
+	const now = new Date()
+	const [major = '', minor = '', patch = ''] = version.split('-', 1)[0]!.split('.', 3)
 	const tokens: Record<string, string> = {
-		date: new Date().toISOString().slice(0, 10),
-		major: version.split('.', 1)[0]!,
-		minor: version.split('.', 2)[1]!,
+		date: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+		major,
+		minor,
 		oldVersion,
-		patch: version.split('.', 3)[2]!,
+		patch,
+		releaseType,
+		tag: '',
 		version,
 	}
 	const named = TAG_TOKEN
-	if (template.includes('{')) {
+	if (template.match(named) !== null) {
+		tokens.tag = template.replaceAll(named, (_match, key: string) => tokens[key]!)
 		return template.replaceAll(named, (_match, key: string) => tokens[key]!)
 	}
 
@@ -52,6 +58,7 @@ export function createBumppHook(options: BumppHookOptions = {}): ExecuteHook {
 					operation.options.tag?.name,
 					operation.state.newVersion,
 					operation.state.currentVersion,
+					operation.state.release,
 				),
 				version: operation.state.newVersion,
 			},

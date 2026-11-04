@@ -18,9 +18,10 @@ export async function runCommand(
 ): Promise<{ code: number; stderr: string; stdout: string }> {
 	options.signal?.throwIfAborted()
 	return new Promise((resolve, reject) => {
+		const detached = options.inherit !== true && process.platform !== 'win32'
 		const child = crossSpawn(command, args, {
 			cwd: options.cwd,
-			detached: process.platform !== 'win32',
+			detached,
 			env: options.env ?? process.env,
 			stdio: options.inherit === true ? 'inherit' : 'pipe',
 			windowsHide: true,
@@ -31,7 +32,7 @@ export async function runCommand(
 		const stop = (message: string) => {
 			failure = new Error(message)
 			try {
-				if (process.platform === 'win32' || child.pid === undefined) {
+				if (!detached || child.pid === undefined) {
 					child.kill('SIGKILL')
 				} else {
 					process.kill(-child.pid, 'SIGKILL')
