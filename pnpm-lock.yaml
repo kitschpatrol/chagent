@@ -166,18 +166,36 @@ importers:
 
   .:
     dependencies:
+      '@clack/prompts':
+        specifier: ^1.8.1
+        version: 1.8.1
       '@types/node':
         specifier: ~24.13.6
         version: 24.13.6
       '@types/yargs':
         specifier: ^17.0.35
         version: 17.0.35
+      cosmiconfig:
+        specifier: ^10.0.1
+        version: 10.0.1
+      cosmiconfig-typescript-loader:
+        specifier: ^6.3.0
+        version: 6.3.0(@types/node@24.13.6)(cosmiconfig@10.0.1)(typescript@6.0.3)
       lognow:
         specifier: ^0.8.8
         version: 0.8.8
+      semver:
+        specifier: ^7.8.6
+        version: 7.8.6
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
       yargs:
         specifier: ^18.2.0
         version: 18.2.0
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
     devDependencies:
       '@arethetypeswrong/core':
         specifier: ^0.18.5
@@ -185,6 +203,9 @@ importers:
       '@kitschpatrol/shared-config':
         specifier: ^8.14.1
         version: 8.14.1(@pnpm/logger@1100.0.0)(@types/estree@1.0.10)(@types/node@24.13.6)(@types/unist@3.0.3)(@typescript-eslint/utils@8.72.1(eslint@10.14.0(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3))(jiti@2.7.0)(mdast-util-from-markdown@2.1.0(supports-color@10.2.2))(mdast-util-mdx@3.0.0(supports-color@10.2.2))(micromark-util-types@2.0.3)(postcss-html@2.0.0(postcss@8.5.32))(remark-parse@11.0.0(supports-color@10.2.2))(stylelint-order@8.1.2(stylelint@17.16.0(supports-color@10.2.2)(typescript@6.0.3)))(supports-color@10.2.2)(svelte@5.57.3(@typescript-eslint/types@8.72.1))(typescript@6.0.3)(vitest@5.1.0(@types/node@24.13.6)(vite@8.3.5(@types/node@24.13.6)(jiti@2.7.0)(yaml@2.9.1)))
+      '@types/semver':
+        specifier: ^7.8.0
+        version: 7.8.0
       bumpp:
         specifier: ^12.3.0
         version: 12.3.0
@@ -1880,6 +1901,9 @@ packages:
 
   '@types/parse-path@7.0.3':
     resolution: {integrity: sha512-LriObC2+KYZD3FzCrgWGv/qufdUy4eXrxcLgQMfYXgPbLIecKIsVBaQgUPmxSSLcjmYbDTQbMgr6qr6l/eb7Bg==}
+
+  '@types/semver@7.8.0':
+    resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
 
   '@types/ssri@7.1.5':
     resolution: {integrity: sha512-odD/56S3B51liILSk5aXJlnYt99S6Rt9EFDDqGtJM26rKHApHcwyU/UoYHrzKkdkHMAIquGWCuHtQTbes+FRQw==}
@@ -7808,6 +7832,8 @@ snapshots:
   '@types/normalize-package-data@2.4.4': {}
 
   '@types/parse-path@7.0.3': {}
+
+  '@types/semver@7.8.0': {}
 
   '@types/ssri@7.1.5':
     dependencies:

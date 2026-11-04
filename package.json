@@ -46,14 +46,21 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
+		"@clack/prompts": "^1.8.1",
 		"@types/node": "~24.13.6",
 		"@types/yargs": "^17.0.35",
+		"cosmiconfig": "^10.0.1",
+		"cosmiconfig-typescript-loader": "^6.3.0",
 		"lognow": "^0.8.8",
-		"yargs": "^18.2.0"
+		"semver": "^7.8.6",
+		"yaml": "^2.9.1",
+		"yargs": "^18.2.0",
+		"zod": "^4.6.7"
 	},
 	"devDependencies": {
 		"@arethetypeswrong/core": "^0.18.5",
 		"@kitschpatrol/shared-config": "^8.14.1",
+		"@types/semver": "^7.8.0",
 		"bumpp": "^12.3.0",
 		"mdat-plugin-cli-help": "^3.4.2",
 		"publint": "^0.3.25",
