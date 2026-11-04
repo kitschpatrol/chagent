@@ -1,0 +1,69 @@
+{
+	"name": "@kitschpatrol/chagent",
+	"version": "0.0.0",
+	"description": "A cli+library project.",
+	"keywords": [
+		"cli",
+		"npm-package"
+	],
+	"homepage": "https://github.com/kitschpatrol/chagent",
+	"bugs": "https://github.com/kitschpatrol/chagent/issues",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/kitschpatrol/chagent.git"
+	},
+	"license": "MIT",
+	"author": {
+		"name": "Eric Mika",
+		"email": "eric@ericmika.com",
+		"url": "https://ericmika.com"
+	},
+	"sideEffects": false,
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/lib/index.d.ts",
+			"import": "./dist/lib/index.js"
+		}
+	},
+	"main": "./dist/lib/index.js",
+	"module": "./dist/lib/index.js",
+	"types": "./dist/lib/index.d.ts",
+	"bin": {
+		"chagent": "dist/bin/cli.js"
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"bench": "vitest bench --run",
+		"bench:baseline": "vitest bench --run",
+		"build": "tsdown",
+		"clean-deep": "shx rm -f pnpm-lock.yaml && git clean -fdX",
+		"fix": "pnpm build && ksc fix",
+		"lint": "pnpm build && ksc lint",
+		"release": "bumpp --commit 'Release: %s' && pnpm build && pnpm publish --otp $(op item get npm --otp)",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@types/node": "~24.13.6",
+		"@types/yargs": "^17.0.35",
+		"lognow": "^0.8.8",
+		"yargs": "^18.2.0"
+	},
+	"devDependencies": {
+		"@arethetypeswrong/core": "^0.18.5",
+		"@kitschpatrol/shared-config": "^8.14.1",
+		"bumpp": "^12.3.0",
+		"mdat-plugin-cli-help": "^3.4.2",
+		"publint": "^0.3.25",
+		"shx": "^0.4.0",
+		"tsdown": "^0.23.5",
+		"typescript": "~6.0.3",
+		"vitest": "^5.1.0"
+	},
+	"packageManager": "pnpm@12.16.1",
+	"engines": {
+		"node": "^24.16.0 || >=26.3.0"
+	}
+}
