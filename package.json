@@ -1,10 +1,14 @@
 {
 	"name": "@kitschpatrol/chagent",
 	"version": "0.0.0",
-	"description": "A cli+library project.",
+	"description": "Generate and update changelogs from Git history using locally authenticated coding agents.",
 	"keywords": [
+		"changelog",
 		"cli",
-		"npm-package"
+		"codex",
+		"claude",
+		"release-notes",
+		"typescript"
 	],
 	"homepage": "https://github.com/kitschpatrol/chagent",
 	"bugs": "https://github.com/kitschpatrol/chagent/issues",
@@ -24,6 +28,10 @@
 		".": {
 			"types": "./dist/lib/index.d.ts",
 			"import": "./dist/lib/index.js"
+		},
+		"./bumpp": {
+			"types": "./dist/lib/bumpp.d.ts",
+			"import": "./dist/lib/bumpp.js"
 		}
 	},
 	"main": "./dist/lib/index.js",
@@ -33,11 +41,10 @@
 		"chagent": "dist/bin/cli.js"
 	},
 	"files": [
-		"dist"
+		"dist",
+		"third-party-notices.md"
 	],
 	"scripts": {
-		"bench": "vitest bench --run",
-		"bench:baseline": "vitest bench --run",
 		"build": "tsdown",
 		"clean-deep": "shx rm -f pnpm-lock.yaml && git clean -fdX",
 		"fix": "pnpm build && ksc fix",
@@ -51,6 +58,7 @@
 		"@types/yargs": "^17.0.35",
 		"cosmiconfig": "^10.0.1",
 		"cosmiconfig-typescript-loader": "^6.3.0",
+		"cross-spawn": "^7.0.6",
 		"lognow": "^0.8.8",
 		"semver": "^7.8.6",
 		"yaml": "^2.9.1",
@@ -60,6 +68,7 @@
 	"devDependencies": {
 		"@arethetypeswrong/core": "^0.18.5",
 		"@kitschpatrol/shared-config": "^8.14.1",
+		"@types/cross-spawn": "^6.0.6",
 		"@types/semver": "^7.8.0",
 		"bumpp": "^12.3.0",
 		"mdat-plugin-cli-help": "^3.4.2",
@@ -68,6 +77,14 @@
 		"tsdown": "^0.23.5",
 		"typescript": "~6.0.3",
 		"vitest": "^5.1.0"
+	},
+	"peerDependencies": {
+		"bumpp": ">=12.3.0"
+	},
+	"peerDependenciesMeta": {
+		"bumpp": {
+			"optional": true
+		}
 	},
 	"packageManager": "pnpm@12.16.1",
 	"engines": {

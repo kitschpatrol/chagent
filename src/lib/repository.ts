@@ -6,6 +6,8 @@ import { z } from 'zod'
 import type { Config, PackageInfo, Release, ReleaseContext, Repository } from './types'
 import { git, runCommand } from './process'
 
+const GITHUB_REMOTE = /github\.com[:\/]([^\/]+\/[^\/]+?)(?:\.git)?$/v
+
 const manifestSchema = z.object({
 	dependencies: z.record(z.string(), z.string()).optional(),
 	engines: z.object({ node: z.string().optional() }).optional(),
@@ -41,9 +43,14 @@ export async function manifestAt(root: string, directory: string, ref: string) {
 	return text === '' ? undefined : manifestSchema.parse(JSON.parse(text))
 }
 
-/** Discover a complete Git checkout and its explicitly declared workspace
-packages. */
-export async function inspectRepository(cwd: string, config: Config = {}): Promise<Repository> {
+/**
+ * Discover a complete Git checkout and its explicitly declared workspace
+ * packages.
+ */
+export async function inspectRepository(
+	cwd: string,
+	config: Pick<Config, 'exclude' | 'packages'> = {},
+): Promise<Repository> {
 	const root = await git(cwd, ['rev-parse', '--show-toplevel'])
 	if ((await git(root, ['rev-parse', '--is-shallow-repository'])) === 'true') {
 		throw new Error(
@@ -55,37 +62,7 @@ export async function inspectRepository(cwd: string, config: Config = {}): Promi
 	const gitDirectory = await git(root, ['rev-parse', '--absolute-git-dir'])
 	const rootText = await readOptional(path.join(root, 'package.json'))
 	const manifest = rootText === undefined ? undefined : manifestSchema.parse(JSON.parse(rootText))
-	let patterns = Array.isArray(manifest?.workspaces)
-		? manifest.workspaces
-		: (manifest?.workspaces?.packages ?? [])
-	const workspaceText = await readOptional(path.join(root, 'pnpm-workspace.yaml'))
-	if (workspaceText !== undefined) {
-		patterns =
-			z.object({ packages: z.array(z.string()).optional() }).parse(parse(workspaceText)).packages ??
-			patterns
-	}
-
-	patterns = config.packages ?? patterns
-	const directories: string[] = []
-	const positive = patterns.filter((pattern) => !pattern.startsWith('!'))
-	const negative = patterns.filter((pattern) => pattern.startsWith('!')).map((pattern) => pattern.slice(1))
-	for await (const entry of glob(positive, { cwd: root, withFileTypes: true, exclude: ['**/node_modules/**', '**/.git/**', ...negative, ...(config.exclude ?? [])] })) {
-		if (entry.isDirectory()) {
-			directories.push(path.relative(root, path.join(entry.parentPath, entry.name)))
-		}
-	}
-	const packages: PackageInfo[] = []
-	for (const directory of directories.toSorted()) {
-		const absolute = await realpath(path.join(root, directory))
-		if (!absolute.startsWith(root + path.sep)) {
-			throw new Error(`Workspace package escapes the repository: ${directory}`)
-		}
-
-		const text = await readOptional(path.join(root, directory, 'package.json'))
-		if (text !== undefined) {
-			packages.push(packageInfo(manifestSchema.parse(JSON.parse(text)), directory))
-		}
-	}
+	const packages = await workspacePackages(root, manifest, config)
 
 	const tagText = await git(root, [
 		'for-each-ref',
@@ -99,15 +76,18 @@ export async function inspectRepository(cwd: string, config: Config = {}): Promi
 		if (name === '') {
 			continue
 		}
+
 		const commit = await git(root, ['rev-parse', name + '^{commit}'], true)
-		if (commit !== '') {
-			const date = await git(root, ['log', '-1', '--format=%cs', commit])
-			tags.push({ commit, date, name })
+		if (commit === '') {
+			continue
 		}
+
+		const date = await git(root, ['log', '-1', '--format=%cs', commit])
+		tags.push({ commit, date, name })
 	}
 
 	const remote = await git(root, ['remote', 'get-url', 'origin'], true)
-	const github = /github\.com[:\/]([^\/]+\/[^\/]+?)(?:\.git)?$/v.exec(remote)?.[1]
+	const github = GITHUB_REMOTE.exec(remote)?.[1]
 	return {
 		gitDirectory,
 		github,
@@ -138,21 +118,18 @@ function packageInfo(
 }
 
 function tagVersion(tag: string, pkg: PackageInfo, patterns?: string[]): string | undefined {
-	const templates = patterns ?? [
-		'{name}@{version}',
-		'{name}/v{version}',
-		'v{version}',
-		'{version}',
-	]
+	const templates = patterns ?? ['{name}@{version}', '{name}/v{version}', 'v{version}', '{version}']
 	for (const pattern of templates) {
 		const expanded = pattern.replaceAll('{name}', () => pkg.name)
 		const [prefix, suffix = ''] = expanded.split('{version}', 2)
-		if (prefix !== undefined && tag.startsWith(prefix) && tag.endsWith(suffix)) {
-			const value = tag.slice(prefix.length, suffix === '' ? undefined : -suffix.length)
-			const version = semver.valid(value)
-			if (version !== null) {
-				return version
-			}
+		if (prefix === undefined || !tag.startsWith(prefix) || !tag.endsWith(suffix)) {
+			continue
+		}
+
+		const value = tag.slice(prefix.length, suffix === '' ? undefined : -suffix.length)
+		const version = semver.valid(value)
+		if (version !== null) {
+			return version
 		}
 	}
 
@@ -163,65 +140,24 @@ function tagVersion(tag: string, pkg: PackageInfo, patterns?: string[]): string 
 export async function resolveReleases(
 	repository: Repository,
 	pkg: PackageInfo,
-	config: Config,
+	config: Pick<Config, 'tagPatterns'>,
 	context?: ReleaseContext,
 ): Promise<Release[]> {
-	const releases: Release[] = []
-	for (const tag of repository.tags) {
-		const version = tagVersion(tag.name, pkg, config.tagPatterns)
-		if (version === undefined) {
-			continue
-		}
-
-		const manifest = await manifestAt(repository.root, pkg.directory, tag.commit)
-		if (
-			(pkg.directory !== '.' && manifest === undefined) ||
-			(manifest?.version !== undefined && semver.valid(manifest.version) !== version)
-		) {
-			continue
-		}
-
-		const existing = releases.find((release) => release.version === version)
-		if (existing && existing.ref !== tag.commit) {
-			throw new Error(
-				`Multiple reachable tags disagree about ${pkg.name} ${version}. Configure tagPatterns to select a release series.`,
-			)
-		}
-
-		if (!existing) {
-			releases.push({ date: tag.date, ref: tag.commit, tag: tag.name, version })
-		}
-	}
+	const releases = await taggedReleases(repository, pkg, config)
 
 	releases.sort((a, b) => semver.compare(a.version, b.version))
 	for (let index = 1; index < releases.length; index++) {
-		const previous = releases[index - 1]!
 		const current = releases[index]!
-		const result = await runCommand(
-			'git',
-			['merge-base', '--is-ancestor', previous.ref, current.ref],
-			{ allowFailure: true, cwd: repository.root },
-		)
-		if (result.code !== 0) {
-			throw new Error(
-				`Release tags for ${pkg.name} do not form one ancestry chain (${previous.tag}, ${current.tag}). Configure tagPatterns for this release line.`,
-			)
-		}
-
-		current.previousRef = previous.ref
-		current.previousTag = previous.tag
+		const previous = await precedingRelease(repository.root, releases.slice(0, index), current.ref)
+		current.previousRef = previous?.ref
+		current.previousTag = previous?.tag
 	}
 
 	const latest = releases.at(-1)
 	const currentVersion = pkg.version ?? (pkg.directory === '.' ? context?.version : undefined)
-	const committed = await manifestAt(repository.root, pkg.directory, repository.head)
-	const versionChanged = currentVersion !== undefined && currentVersion !== committed?.version
-	const pending =
-		currentVersion !== undefined &&
-		semver.valid(currentVersion) !== null &&
-		(latest === undefined || semver.gt(currentVersion, latest.version)) &&
-		(versionChanged || context !== undefined)
-	if (pending) {
+	const pending = await isPendingRelease(repository, pkg, latest, context)
+
+	if (pending && currentVersion !== undefined) {
 		releases.push({
 			date: context?.date ?? new Date().toISOString().slice(0, 10),
 			pending: true,
@@ -243,8 +179,10 @@ export async function resolveReleases(
 	return releases
 }
 
-/** Detect stable minor/patch releases that raised the minimum Node.js
-requirement. */
+/**
+ * Detect stable minor/patch releases that raised the minimum Node.js
+ * requirement.
+ */
 export async function hasNodeException(
 	repository: Repository,
 	pkg: PackageInfo,
@@ -283,4 +221,130 @@ export async function hasNodeException(
 	}
 
 	return false
+}
+
+async function workspacePackages(
+	root: string,
+	manifest: undefined | z.infer<typeof manifestSchema>,
+	config: Pick<Config, 'exclude' | 'packages'>,
+): Promise<PackageInfo[]> {
+	let patterns = Array.isArray(manifest?.workspaces)
+		? manifest.workspaces
+		: (manifest?.workspaces?.packages ?? [])
+	const workspaceText = await readOptional(path.join(root, 'pnpm-workspace.yaml'))
+	if (workspaceText !== undefined) {
+		patterns =
+			z.object({ packages: z.array(z.string()).optional() }).parse(parse(workspaceText)).packages ??
+			patterns
+	}
+
+	patterns = config.packages ?? patterns
+	const directories: string[] = []
+	const positive = patterns.filter((pattern) => !pattern.startsWith('!'))
+	const negative = patterns
+		.filter((pattern) => pattern.startsWith('!'))
+		.map((pattern) => pattern.slice(1))
+	const matches = glob(positive, {
+		cwd: root,
+		exclude: ['**/node_modules/**', '**/.git/**', ...negative, ...(config.exclude ?? [])],
+		withFileTypes: true,
+	})
+	for await (const entry of matches) {
+		if (!entry.isDirectory()) {
+			continue
+		}
+
+		directories.push(path.relative(root, path.join(entry.parentPath, entry.name)))
+	}
+
+	const packages: PackageInfo[] = []
+	for (const directory of directories.toSorted()) {
+		const absolute = await realpath(path.join(root, directory))
+		if (!absolute.startsWith(root + path.sep)) {
+			throw new Error(`Workspace package escapes the repository: ${directory}`)
+		}
+
+		const text = await readOptional(path.join(root, directory, 'package.json'))
+		if (text === undefined) {
+			continue
+		}
+
+		packages.push(packageInfo(manifestSchema.parse(JSON.parse(text)), directory))
+	}
+
+	return packages
+}
+
+async function taggedReleases(
+	repository: Repository,
+	pkg: PackageInfo,
+	config: Pick<Config, 'tagPatterns'>,
+): Promise<Release[]> {
+	const releases: Release[] = []
+	for (const tag of repository.tags) {
+		const version = tagVersion(tag.name, pkg, config.tagPatterns)
+		if (version === undefined) {
+			continue
+		}
+
+		const manifest = await manifestAt(repository.root, pkg.directory, tag.commit)
+		if (
+			(manifest === undefined && pkg.directory !== '.') ||
+			(manifest?.version !== undefined && semver.valid(manifest.version) !== version)
+		) {
+			continue
+		}
+
+		const existing = releases.find((release) => release.version === version)
+		if (existing && existing.ref !== tag.commit) {
+			throw new Error(
+				`Multiple reachable tags disagree about ${pkg.name} ${version}. Configure tagPatterns to select a release series.`,
+			)
+		}
+
+		if (existing) {
+			continue
+		}
+
+		releases.push({ date: tag.date, ref: tag.commit, tag: tag.name, version })
+	}
+
+	return releases
+}
+
+async function precedingRelease(
+	root: string,
+	candidates: Release[],
+	ref: string,
+): Promise<Release | undefined> {
+	for (const candidate of candidates.toReversed()) {
+		const result = await runCommand('git', ['merge-base', '--is-ancestor', candidate.ref, ref], {
+			allowFailure: true,
+			cwd: root,
+		})
+		if (result.code !== 0) {
+			continue
+		}
+
+		return candidate
+	}
+
+	return undefined
+}
+
+async function isPendingRelease(
+	repository: Repository,
+	pkg: PackageInfo,
+	latest: Release | undefined,
+	context?: ReleaseContext,
+): Promise<boolean> {
+	const currentVersion = pkg.version ?? (pkg.directory === '.' ? context?.version : undefined)
+	const committed = await manifestAt(repository.root, pkg.directory, repository.head)
+	const versionChanged = currentVersion !== undefined && currentVersion !== committed?.version
+	return (
+		currentVersion !== undefined &&
+		semver.valid(currentVersion) !== null &&
+		(latest === undefined || semver.gt(currentVersion, latest.version)) &&
+		(versionChanged || context !== undefined)
+	)
 }

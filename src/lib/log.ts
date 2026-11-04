@@ -5,7 +5,7 @@ import { name } from '../../package.json' with { type: 'json' }
 /**
  * The default logger instance for the library.
  */
-export let log = createLogger(name)
+export let log = createLogger({ logToConsole: false, name })
 
 /**
  * Set the logger instance for the module. Export this for library consumers to

@@ -80,7 +80,7 @@ export type PackageInfo = {
 	version?: string
 }
 
-export type GitTag = {
+type GitTag = {
 	commit: string
 	date: string
 	name: string
@@ -112,7 +112,7 @@ export type FileEdit = {
 	path: string
 }
 
-export type Checkpoint = {
+type Checkpoint = {
 	baseRef: string
 	contentHash: string
 	head: string

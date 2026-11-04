@@ -181,6 +181,9 @@ importers:
       cosmiconfig-typescript-loader:
         specifier: ^6.3.0
         version: 6.3.0(@types/node@24.13.6)(cosmiconfig@10.0.1)(typescript@6.0.3)
+      cross-spawn:
+        specifier: ^7.0.6
+        version: 7.0.6
       lognow:
         specifier: ^0.8.8
         version: 0.8.8
@@ -203,6 +206,9 @@ importers:
       '@kitschpatrol/shared-config':
         specifier: ^8.14.1
         version: 8.14.1(@pnpm/logger@1100.0.0)(@types/estree@1.0.10)(@types/node@24.13.6)(@types/unist@3.0.3)(@typescript-eslint/utils@8.72.1(eslint@10.14.0(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3))(jiti@2.7.0)(mdast-util-from-markdown@2.1.0(supports-color@10.2.2))(mdast-util-mdx@3.0.0(supports-color@10.2.2))(micromark-util-types@2.0.3)(postcss-html@2.0.0(postcss@8.5.32))(remark-parse@11.0.0(supports-color@10.2.2))(stylelint-order@8.1.2(stylelint@17.16.0(supports-color@10.2.2)(typescript@6.0.3)))(supports-color@10.2.2)(svelte@5.57.3(@typescript-eslint/types@8.72.1))(typescript@6.0.3)(vitest@5.1.0(@types/node@24.13.6)(vite@8.3.5(@types/node@24.13.6)(jiti@2.7.0)(yaml@2.9.1)))
+      '@types/cross-spawn':
+        specifier: ^6.0.6
+        version: 6.0.6
       '@types/semver':
         specifier: ^7.8.0
         version: 7.8.0
@@ -1850,6 +1856,9 @@ packages:
 
   '@types/concat-stream@2.0.3':
     resolution: {integrity: sha512-3qe4oQAPNwVNwK4C9c8u+VJqv9kez+2MR4qJpoPFfXtgxxif1QbFusvXzK0/Wra2VX07smostI2VMmJNSpZjuQ==}
+
+  '@types/cross-spawn@6.0.6':
+    resolution: {integrity: sha512-fXRhhUkG4H3TQk5dBhQ7m/JDdSNHKwR2BBia62lhwEIq9xGiQKLxd6LymNhn47SjXhsUEPmxi+PKw2OkW4LLjA==}
 
   '@types/css-tree@2.3.11':
     resolution: {integrity: sha512-aEokibJOI77uIlqoBOkVbaQGC9zII0A+JH1kcTNKW2CwyYWD8KM6qdo+4c77wD3wZOQfJuNWAr9M4hdk+YhDIg==}
@@ -7782,6 +7791,10 @@ snapshots:
       assertion-error: 2.0.1
 
   '@types/concat-stream@2.0.3':
+    dependencies:
+      '@types/node': 24.13.6
+
+  '@types/cross-spawn@6.0.6':
     dependencies:
       '@types/node': 24.13.6
 

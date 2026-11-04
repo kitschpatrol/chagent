@@ -41,12 +41,12 @@ describe('release history', () => {
 		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
 		await commit(root, 'Fix the answer.')
 		let repository = await inspectRepository(root)
-		expect((await resolveReleases(repository, repository.rootPackage, {})).at(-1)?.version).toBe(
-			'Unreleased',
-		)
+		const awaitedResult1 = await resolveReleases(repository, repository.rootPackage, {})
+		expect(awaitedResult1.at(-1)?.version).toBe('Unreleased')
 		await writeFiles(root, { 'package.json': '{"name":"example","version":"1.0.1"}' })
 		repository = await inspectRepository(root)
-		expect((await resolveReleases(repository, repository.rootPackage, {})).at(-1)).toMatchObject({
+		const awaitedResult2 = await resolveReleases(repository, repository.rootPackage, {})
+		expect(awaitedResult2.at(-1)).toMatchObject({
 			pending: true,
 			version: '1.0.1',
 		})
@@ -78,7 +78,8 @@ describe('release history', () => {
 		await writeFiles(root, { 'CHANGELOG.md': '# Changelog\n\nInvented release descriptions.\n' })
 		await commit(root, 'Generate release notes.')
 		const repository = await inspectRepository(root)
-		const release = (await resolveReleases(repository, repository.rootPackage, {})).at(-1)!
+		const awaitedResult3 = await resolveReleases(repository, repository.rootPackage, {})
+		const release = awaitedResult3.at(-1)!
 		expect(await collectEvidence(repository, repository.rootPackage, release)).toEqual([])
 	})
 
@@ -93,10 +94,7 @@ describe('release history', () => {
 		await git(root, ['tag', '@example/b@2.0.0'])
 		const repository = await inspectRepository(root)
 		expect(repository.packages.map((pkg) => pkg.name)).toEqual(['@example/a', '@example/b'])
-		expect(
-			(await resolveReleases(repository, repository.packages[1]!, {})).map(
-				(release) => release.version,
-			),
-		).toEqual(['2.0.0'])
+		const awaitedResult4 = await resolveReleases(repository, repository.packages[1]!, {})
+		expect(awaitedResult4.map((release) => release.version)).toEqual(['2.0.0'])
 	})
 })

@@ -2,11 +2,11 @@ import path from 'node:path'
 import type { Evidence, PackageInfo, Release, Repository } from './types'
 import { git, runCommand } from './process'
 
+const GENERATED_PATH = /(?:^|\/)(?:changelog(?:\.md)?|node_modules|dist|build|coverage)(?:\/|$)/iv
+const LOCKFILE_PATH = /(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?)$/v
+
 function ignored(file: string): boolean {
-	return (
-		/(?:^|\/)(?:changelog(?:\.md)?|node_modules|dist|build|coverage)(?:\/|$)/iv.test(file) ||
-		/(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?)$/v.test(file)
-	)
+	return GENERATED_PATH.test(file) || LOCKFILE_PATH.test(file)
 }
 
 function scopes(repository: Repository, pkg: PackageInfo): string[] {
@@ -36,59 +36,58 @@ export async function collectEvidence(
 	repository: Repository,
 	pkg: PackageInfo,
 	release: Release,
+	excludeDirectories: string[] = [],
 ): Promise<Evidence[]> {
 	const { root } = repository
 	const directories = scopes(repository, pkg)
-	const paths = directories.map((directory) => `:(literal)${directory}`)
+	const paths = [
+		...directories.map((directory) => `:(literal)${directory}`),
+		...excludeDirectories.map((directory) => `:(exclude,literal)${directory}`),
+	]
 	const range =
 		release.previousRef === undefined ? release.ref : `${release.previousRef}..${release.ref}`
 	const emptyTree = await git(root, ['hash-object', '-t', 'tree', '--stdin'])
 	const from = release.previousRef ?? emptyTree
-	const changed = (
-		await git(root, [
-			'diff',
-			'--no-ext-diff',
-			'--no-textconv',
-			'--name-only',
-			'-z',
-			'--no-renames',
-			from,
-			release.ref,
-			'--',
-			...paths,
-		])
-	)
-		.split('\0')
-		.filter((file) => file !== '' && !ignored(file))
+	const awaitedResult1 = await git(root, [
+		'diff',
+		'--no-ext-diff',
+		'--no-textconv',
+		'--name-only',
+		'-z',
+		'--no-renames',
+		from,
+		release.ref,
+		'--',
+		...paths,
+	])
+	const changed = awaitedResult1.split('\0').filter((file) => file !== '' && !ignored(file))
 	if (changed.length === 0) {
 		return []
 	}
 
 	const evidence: Evidence[] = []
-	const commits = (await git(root, ['log', '--format=%H', range, '--', ...paths]))
-		.split('\n')
-		.filter(Boolean)
+	const awaitedResult2 = await git(root, ['log', '--format=%H', range, '--', ...paths])
+	const commits = awaitedResult2.split('\n').filter(Boolean)
 	for (const commit of commits) {
-		const files = (
-			await git(root, [
-				'diff-tree',
-				'--root',
-				'-m',
-				'--no-commit-id',
-				'--name-only',
-				'-r',
-				'-z',
-				commit,
-				'--',
-				...paths,
-			])
-		)
-			.split('\0')
-			.filter((file) => file !== '' && !ignored(file))
-		if (files.some((file) => changed.includes(file))) {
-			const message = await git(root, ['show', '-s', '--format=%B', commit])
-			evidence.push({ id: commit, kind: 'commit', text: `${message}\nFiles: ${files.join(', ')}` })
+		const awaitedResult3 = await git(root, [
+			'diff-tree',
+			'--root',
+			'-m',
+			'--no-commit-id',
+			'--name-only',
+			'-r',
+			'-z',
+			commit,
+			'--',
+			...paths,
+		])
+		const files = awaitedResult3.split('\0').filter((file) => file !== '' && !ignored(file))
+		if (files.every((file) => !changed.includes(file))) {
+			continue
 		}
+
+		const message = await git(root, ['show', '-s', '--format=%B', commit])
+		evidence.push({ id: commit, kind: 'commit', text: `${message}\nFiles: ${files.join(', ')}` })
 	}
 
 	for (const file of changed) {
@@ -123,8 +122,66 @@ export async function collectEvidence(
 	return evidence
 }
 
-/** Add PR context by commit association; release-note bodies are never
-requested. */
+/**
+ * Read release dates only, keeping generated release bodies out of agent
+ * inputs.
+ */
+export async function enrichReleaseDates(
+	repository: Repository,
+	diagnostics: string[],
+	signal?: AbortSignal,
+): Promise<void> {
+	if (repository.github === undefined || repository.tags.length === 0) {
+		return
+	}
+
+	try {
+		const result = await runCommand(
+			'gh',
+			[
+				'api',
+				'--paginate',
+				`repos/${repository.github}/releases`,
+				'--jq',
+				'.[] | {tag_name, published_at, draft}',
+			],
+			{ cwd: repository.root, signal, timeoutMs: 15_000 },
+		)
+		for (const line of result.stdout.split('\n')) {
+			if (line === '') {
+				continue
+			}
+
+			const value: unknown = JSON.parse(line)
+			if (
+				typeof value !== 'object' ||
+				value === null ||
+				!('tag_name' in value) ||
+				!('published_at' in value) ||
+				typeof value.published_at !== 'string' ||
+				!('draft' in value) ||
+				value.draft !== false
+			) {
+				continue
+			}
+
+			const tag = repository.tags.find((item) => item.name === value.tag_name)
+			if (tag && !Number.isNaN(Date.parse(value.published_at))) {
+				tag.date = new Date(value.published_at).toISOString().slice(0, 10)
+			}
+		}
+	} catch (error) {
+		signal?.throwIfAborted()
+		diagnostics.push(
+			`GitHub enrichment unavailable; using Git evidence. ${error instanceof Error ? error.message : String(error)}`,
+		)
+	}
+}
+
+/**
+ * Add PR context by commit association; release-note bodies are never
+ * requested.
+ */
 export async function enrichWithGithub(
 	repository: Repository,
 	evidence: Evidence[],
@@ -138,7 +195,11 @@ export async function enrichWithGithub(
 	const extra: Evidence[] = []
 	const seen = new Set<number>()
 	try {
-		for (const item of evidence.filter((entry) => entry.kind === 'commit')) {
+		for (const item of evidence) {
+			if (item.kind !== 'commit') {
+				continue
+			}
+
 			const result = await runCommand(
 				'gh',
 				[
@@ -150,7 +211,11 @@ export async function enrichWithGithub(
 				],
 				{ cwd: repository.root, signal, timeoutMs: 15_000 },
 			)
-			for (const line of result.stdout.split('\n').filter(Boolean)) {
+			for (const line of result.stdout.split('\n')) {
+				if (line === '') {
+					continue
+				}
+
 				const value: unknown = JSON.parse(line)
 				if (
 					typeof value !== 'object' ||

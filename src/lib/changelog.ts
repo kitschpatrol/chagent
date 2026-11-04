@@ -1,9 +1,22 @@
-import { readdir } from 'node:fs/promises'
+import { lstat, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import semver from 'semver'
 import type { Change, Release } from './types'
 import { readOptional } from './repository'
 import { categories } from './types'
+
+const LINE_BOUNDARY = /(?<=\n)/v
+const FENCE = /^\s{0,3}(`{3,}|~{3,})/v
+const RELEASE_HEADING = /^## (?:\[([^\]]+)\](?:\([^\)]*\))?|(\S+))(?:\s+[\-–—].*)?$/v
+const REFERENCE = /^\[[^\]]+\]:\s+\S/v
+const WHITESPACE = /\s+/gv
+const TERMINAL_PUNCTUATION = /[.!]$/v
+const NEWLINE = /\r?\n/v
+const BULLET = /^\s*[\-*] /v
+const BULLET_PREFIX = /^\s*[\-*] /v
+const CATEGORY_HEADING = /^### /mv
+const SEMVER_LINE = /^.*\[Semantic Versioning\].*(?:\r?\n|$)/mv
+const UNRELEASED_REFERENCE = /^\[unreleased\]:[^\r\n]*(?:\r?\n)?/imv
 
 export const changelogHeader =
 	'# Changelog\n\nAll notable changes to this project will be documented in this file.\n\nThe format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),\nand this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).\n'
@@ -24,6 +37,13 @@ export async function findChangelog(
 	}
 
 	const file = path.join(directory, files[0] ?? 'changelog.md')
+	if (files.length > 0) {
+		const metadata = await lstat(file)
+		if (metadata.isSymbolicLink()) {
+			throw new Error(`Changelog destination is not a regular file: ${file}`)
+		}
+	}
+
 	return { content: await readOptional(file), path: file }
 }
 
@@ -34,8 +54,8 @@ export function parseChangelog(content: string): Changelog {
 	let offset = 0
 	let fence = ''
 	let footerStart = content.length
-	for (const line of content.split(/(?<=\n)/v)) {
-		const marker = /^\s{0,3}(`{3,}|~{3,})/v.exec(line)?.[1]
+	for (const line of content.split(LINE_BOUNDARY)) {
+		const marker = FENCE.exec(line)?.[1]
 		if (marker !== undefined) {
 			if (fence === '') {
 				fence = marker
@@ -43,24 +63,17 @@ export function parseChangelog(content: string): Changelog {
 				fence = ''
 			}
 		} else if (fence === '') {
-			const match = /^## (?:\[([^\]]+)\](?:\([^\)]*\))?|([^\s]+))(?:\s+[\-–—].*)?\s*$/v.exec(
-				line.trimEnd(),
-			)
+			const match = RELEASE_HEADING.exec(line.trimEnd())
 			if (match) {
 				const raw = match[1] ?? match[2]!
-				const version =
-					raw.toLowerCase() === 'unreleased' ? 'Unreleased' : (semver.valid(raw) ?? raw)
+				const version = normalizeVersion(raw)
 				if (sections.some((section) => section.version === version)) {
 					throw new Error(`Duplicate changelog section: ${version}`)
 				}
 
 				sections.push({ body: '', end: content.length, heading: line, start: offset, version })
 				footerStart = content.length
-			} else if (
-				/^\[[^\]]+\]:\s+\S/v.test(line) &&
-				sections.length > 0 &&
-				footerStart === content.length
-			) {
+			} else if (REFERENCE.test(line) && sections.length > 0 && footerStart === content.length) {
 				footerStart = offset
 			}
 		}
@@ -83,7 +96,11 @@ export function parseChangelog(content: string): Changelog {
 }
 
 function normalized(description: string): string {
-	return description.trim().toLowerCase().replaceAll(/\s+/gv, ' ').replace(/[.!]$/v, '')
+	return description
+		.trim()
+		.toLowerCase()
+		.replaceAll(WHITESPACE, ' ')
+		.replace(TERMINAL_PUNCTUATION, '')
 }
 
 /** Add generated bullets to a draft while preserving existing human text. */
@@ -91,9 +108,9 @@ export function mergeChanges(body: string, changes: Change[], newline = '\n'): s
 	let result = body
 	const seen = new Set(
 		body
-			.split(/\r?\n/v)
-			.filter((line) => /^\s*[\-*] /v.test(line))
-			.map((line) => normalized(line.replace(/^\s*[\-*] /v, ''))),
+			.split(NEWLINE)
+			.filter((line) => BULLET.test(line))
+			.map((line) => normalized(line.replace(BULLET_PREFIX, ''))),
 	)
 	for (const category of categories) {
 		const descriptions: string[] = []
@@ -101,6 +118,7 @@ export function mergeChanges(body: string, changes: Change[], newline = '\n'): s
 			if (change.category !== category) {
 				continue
 			}
+
 			const description = (change.breaking ? '**Breaking:** ' : '') + change.description
 			if (seen.has(normalized(description))) {
 				continue
@@ -117,7 +135,7 @@ export function mergeChanges(body: string, changes: Change[], newline = '\n'): s
 		const heading = new RegExp(String.raw`^### ${category}\s*$`, 'mv').exec(result)
 		if (heading) {
 			const after = heading.index + heading[0].length
-			const next = /^### /mv.exec(result.slice(after))
+			const next = CATEGORY_HEADING.exec(result.slice(after))
 			const end = next === null ? result.length : after + next.index
 			const block =
 				result.slice(0, end).trimEnd() + newline + descriptions.join(newline) + newline + newline
@@ -140,7 +158,7 @@ export function mergeChanges(body: string, changes: Change[], newline = '\n'): s
 }
 
 /** Render a release heading with an optional comparison link. */
-export function releaseLink(github: string | undefined, release: Release): string | undefined {
+function releaseLink(github: string | undefined, release: Release): string | undefined {
 	if (github === undefined) {
 		return undefined
 	}
@@ -171,20 +189,7 @@ export function updateMarkdown(
 	const content = original ?? changelogHeader
 	const parsed = parseChangelog(content)
 	const { newline } = parsed
-	let { header } = parsed
-	if (nodeException && !header.includes(nodeExceptionNote)) {
-		const semverLine = /^.*\[Semantic Versioning\].*(?:\r?\n|$)/mv.exec(header)
-		if (semverLine) {
-			const index = semverLine.index + semverLine[0].length
-			header =
-				header.slice(0, index).trimEnd() +
-				newline +
-				newline +
-				nodeExceptionNote +
-				newline +
-				header.slice(index)
-		}
-	}
+	const header = addNodeNote(parsed.header, newline, nodeException)
 
 	const additions: string[] = []
 	const definitions: string[] = []
@@ -217,19 +222,18 @@ export function updateMarkdown(
 			}
 		}
 
-		if (link !== undefined) {
-			const definition = `[${release.version}]: ${link}`
-			if (release.version === 'Unreleased') {
-				footer = footer.replace(/^\[unreleased\]:[^\r\n]*(?:\r?\n)?/imv, '')
-				definitions.unshift(definition)
-			} else if (
-				!new RegExp(
-					String.raw`^\[${RegExp.escape(release.version)}\]:`,
-					'imv',
-				).test(footer)
-			) {
-				definitions.push(definition)
-			}
+		if (link === undefined) {
+			continue
+		}
+
+		const definition = `[${release.version}]: ${link}`
+		if (release.version === 'Unreleased') {
+			footer = footer.replace(UNRELEASED_REFERENCE, '')
+			definitions.unshift(definition)
+		} else if (
+			!new RegExp(String.raw`^\[${RegExp.escape(release.version)}\]:`, 'imv').test(footer)
+		) {
+			definitions.push(definition)
 		}
 	}
 
@@ -237,14 +241,52 @@ export function updateMarkdown(
 		return content
 	}
 
-	const prefix = header.trimEnd() + newline + newline
+	const prefix = sectionSpacing(header, newline)
 	let result = prefix + draftText + additions.toReversed().join('') + released.join('')
-	if (footer !== '' || definitions.length > 0) {
-		result = result.trimEnd() + newline + newline + footer
-		if (definitions.length > 0) {
-			result = result.trimEnd() + newline + definitions.join(newline) + newline
-		}
+	if (footer !== '') {
+		result += footer
+	}
+
+	if (definitions.length > 0) {
+		result =
+			(footer === ''
+				? sectionSpacing(result, newline)
+				: result.endsWith(newline)
+					? result
+					: result + newline) +
+			definitions.join(newline) +
+			newline
 	}
 
 	return result
+}
+
+function addNodeNote(header: string, newline: string, nodeException: boolean): string {
+	if (nodeException && !header.includes(nodeExceptionNote)) {
+		const semverLine = SEMVER_LINE.exec(header)
+		if (semverLine) {
+			const index = semverLine.index + semverLine[0].length
+			header =
+				header.slice(0, index).trimEnd() +
+				newline +
+				newline +
+				nodeExceptionNote +
+				newline +
+				header.slice(index)
+		}
+	}
+
+	return header
+}
+
+function normalizeVersion(raw: string): string {
+	return raw.toLowerCase() === 'unreleased' ? 'Unreleased' : (semver.valid(raw) ?? raw)
+}
+
+function sectionSpacing(content: string, newline: string): string {
+	if (content.endsWith(newline + newline)) {
+		return content
+	}
+
+	return content + (content.endsWith(newline) ? newline : newline + newline)
 }

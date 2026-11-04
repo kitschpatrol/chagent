@@ -32,13 +32,11 @@ describe('cli', () => {
 		expect(stdout).toContain('--help')
 	})
 
-	it.each([
-		[[], 'Something happened'],
-		[['do-something'], 'Something happened'],
-		[['do-something-else'], 'Something else happened'],
-	])('should run command %j', async (args, expected) => {
-		const { code, stdout } = await run(...args)
-		expect(code).toBe(0)
-		expect(stdout.trim()).toBe(expected)
+	it('rejects invalid flags and timeout values', async () => {
+		const unknown = await run('--unknown-option')
+		const timeout = await run('--timeout', '-1')
+		expect(unknown.code).toBe(1)
+		expect(timeout.code).toBe(1)
+		expect(timeout.stderr).toContain('positive number')
 	})
 })

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import crossSpawn from 'cross-spawn'
 
 type CommandOptions = {
 	allowFailure?: boolean
@@ -18,7 +18,7 @@ export async function runCommand(
 ): Promise<{ code: number; stderr: string; stdout: string }> {
 	options.signal?.throwIfAborted()
 	return new Promise((resolve, reject) => {
-		const child = spawn(command, args, {
+		const child = crossSpawn(command, args, {
 			cwd: options.cwd,
 			detached: process.platform !== 'win32',
 			env: options.env ?? process.env,
@@ -77,7 +77,9 @@ export async function runCommand(
 				resolve({ code: exitCode, stderr, stdout })
 			} else {
 				reject(
-					new Error(`${command} failed (${exitCode}): ${(stderr === '' ? stdout : stderr).trim().slice(-4000)}`),
+					new Error(
+						`${command} failed (${exitCode}): ${(stderr === '' ? stdout : stderr).trim().slice(-4000)}`,
+					),
 				)
 			}
 		})
@@ -86,10 +88,12 @@ export async function runCommand(
 
 /** Run Git without a shell, pager, or external diff driver. */
 export async function git(root: string, args: string[], allowFailure = false): Promise<string> {
+	// eslint-disable-next-line ts/naming-convention -- Git defines these environment variable names.
+	const env = { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' }
 	const result = await runCommand('git', ['--no-pager', '-c', 'core.quotepath=false', ...args], {
 		allowFailure,
 		cwd: root,
-		env: { ...process.env, ['GIT_OPTIONAL_LOCKS']: '0', ['GIT_TERMINAL_PROMPT']: '0' },
+		env,
 	})
 	return result.code === 0 ? result.stdout.trimEnd() : ''
 }

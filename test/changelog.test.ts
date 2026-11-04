@@ -8,6 +8,8 @@ import {
 	updateMarkdown,
 } from '../src/lib/changelog'
 
+const THEME_DESCRIPTION = /Support custom themes/gv
+
 const change: Change = {
 	breaking: false,
 	category: 'Added',
@@ -64,7 +66,7 @@ describe('changelog rendering', () => {
 			false,
 		)
 		expect(result).not.toContain('## [Unreleased]')
-		expect(result.match(/Support custom themes/gu)).toHaveLength(1)
+		expect(result.match(THEME_DESCRIPTION)).toHaveLength(1)
 	})
 
 	it('adds the evidence-backed Node note only once', () => {
