@@ -63,7 +63,7 @@ if (${JSON.stringify(name)} === 'codex') {
 			const expected =
 				name === 'codex'
 					? ['read-only', 'gpt-6.1-sol', 'model_reasoning_effort="xhigh"']
-					: ['--tools', '']
+					: ['--tools', '', '--model', 'claude-opus-5-5', '--effort', 'xhigh']
 			expect(args).toEqual(expect.arrayContaining(expected))
 		},
 	)

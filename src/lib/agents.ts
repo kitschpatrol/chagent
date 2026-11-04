@@ -48,7 +48,7 @@ function prompt(request: GenerationRequest): string {
 /** Create an adapter for an installed CLI using its existing authentication. */
 export function createAgent(name: AgentName): AgentAdapter {
 	return {
-		cacheKey: `${name}-1`,
+		cacheKey: name === 'claude' ? 'claude-2' : 'codex-1',
 		async generate(request) {
 			const directory = await mkdtemp(path.join(os.tmpdir(), 'chagent-agent-'))
 			try {
@@ -115,8 +115,10 @@ export function createAgent(name: AgentName): AgentAdapter {
 							'{"mcpServers":{}}',
 							'--permission-mode',
 							'dontAsk',
-							...(request.model === undefined ? [] : ['--model', request.model]),
-							...(request.effort === undefined ? [] : ['--effort', request.effort]),
+							'--model',
+							request.model ?? 'claude-opus-5-5',
+							'--effort',
+							request.effort ?? 'xhigh',
 						],
 						{
 							allowFailure: true,

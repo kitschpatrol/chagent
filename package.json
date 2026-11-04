@@ -1,12 +1,13 @@
 {
 	"name": "@kitschpatrol/chagent",
 	"version": "0.0.0",
-	"description": "Generate and update changelogs from Git history using locally authenticated coding agents.",
+	"description": "Changelog agent. CLI tool and TypeScript library to generate and update changelogs with a little help from your LLMs.",
 	"keywords": [
 		"changelog",
 		"cli",
 		"codex",
 		"claude",
+		"agent",
 		"release-notes",
 		"typescript"
 	],
@@ -42,7 +43,7 @@
 	},
 	"files": [
 		"dist",
-		"third-party-notices.md"
+		"docs/third-party-notices.md"
 	],
 	"scripts": {
 		"build": "tsdown",

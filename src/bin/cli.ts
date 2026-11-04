@@ -38,12 +38,13 @@ try {
 						description: 'Installed agent CLI (default: codex)',
 					})
 					.option('model', {
-						description: 'Agent model (Codex default: gpt-6.1-sol)',
+						description:
+							'Agent model (Codex default: gpt-6.1-sol; Claude default: claude-opus-5-5)',
 						type: 'string',
 					})
 					.option('effort', {
 						choices: ['low', 'medium', 'high', 'xhigh', 'max'],
-						description: 'Reasoning effort (Codex default: xhigh)',
+						description: 'Reasoning effort (default: xhigh)',
 					})
 					.option('interactive', {
 						alias: 'i',
