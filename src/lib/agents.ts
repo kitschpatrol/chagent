@@ -156,6 +156,8 @@ async function runCodex(request: GenerationRequest): Promise<unknown> {
 				cwd: repositoryRoot,
 				input: prompt(request),
 				signal: settings.signal,
+				// The response comes from the output file; stdout only streams session events.
+				tailStdout: true,
 				timeoutMs: settings.timeoutMs,
 			},
 		)

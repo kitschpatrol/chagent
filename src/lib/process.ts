@@ -1,5 +1,9 @@
 import crossSpawn from 'cross-spawn'
 
+const STDOUT_LIMIT = 32_000_000
+const STDERR_LIMIT = 4_000_000
+const FAILURE_OUTPUT_LENGTH = 4000
+
 type CommandOptions = {
 	allowFailure?: boolean
 	cwd?: string
@@ -7,6 +11,8 @@ type CommandOptions = {
 	inherit?: boolean
 	input?: string
 	signal?: AbortSignal
+	/** Keep only the end of stdout, for long event streams that nothing parses. */
+	tailStdout?: boolean
 	timeoutMs?: number
 }
 
@@ -51,13 +57,15 @@ export async function runCommand(
 		options.signal?.addEventListener('abort', abort, { once: true })
 		child.stdout?.setEncoding('utf8').on('data', (chunk: string) => {
 			stdout += chunk
-			if (stdout.length > 32_000_000) {
+			if (options.tailStdout === true) {
+				stdout = stdout.slice(-FAILURE_OUTPUT_LENGTH)
+			} else if (stdout.length > STDOUT_LIMIT) {
 				stop(`${command} exceeded the output limit.`)
 			}
 		})
 		child.stderr?.setEncoding('utf8').on('data', (chunk: string) => {
 			stderr += chunk
-			if (stderr.length > 4_000_000) {
+			if (stderr.length > STDERR_LIMIT) {
 				stop(`${command} exceeded the error output limit.`)
 			}
 		})
@@ -79,7 +87,7 @@ export async function runCommand(
 			} else {
 				reject(
 					new Error(
-						`${command} failed (${exitCode}): ${(stderr === '' ? stdout : stderr).trim().slice(-4000)}`,
+						`${command} failed (${exitCode}): ${(stderr === '' ? stdout : stderr).trim().slice(-FAILURE_OUTPUT_LENGTH)}`,
 					),
 				)
 			}

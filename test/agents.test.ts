@@ -122,6 +122,46 @@ if (${JSON.stringify(name)} === 'codex') {
 		},
 	)
 
+	it('survives a Codex session whose event stream exceeds the output limit', async () => {
+		const root = await createRepository()
+		const bin = path.join(root, 'bin')
+		await mkdir(bin)
+		const file = path.join(bin, process.platform === 'win32' ? 'codex.cjs' : 'codex')
+		await writeFile(
+			file,
+			`#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.readFileSync(0);
+fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], '{"releases":[]}');
+fs.writeSync(1, 'event'.repeat(7_000_000));
+`,
+		)
+		await chmod(file, 0o755)
+		if (process.platform === 'win32') {
+			await writeFile(path.join(bin, 'codex.cmd'), '@node "%~dp0codex.cjs" %*\r\n')
+		}
+
+		vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH ?? ''}`)
+		await expect(
+			createAgent('codex').generate({
+				releases: [release],
+				repositoryRoot: root,
+				settings: { effort: 'low', timeoutMs: 30_000 },
+			}),
+		).resolves.toEqual({ releases: [] })
+	}, 40_000)
+
+	it('fails a subprocess that exceeds the output limit unless asked to keep only the tail', async () => {
+		const script = "process.stdout.write('x'.repeat(33_000_000) + 'end')"
+		await expect(runCommand(process.execPath, ['-e', script])).rejects.toThrow(
+			'exceeded the output limit',
+		)
+		const { stdout } = await runCommand(process.execPath, ['-e', script], { tailStdout: true })
+		expect(stdout.length).toBeLessThanOrEqual(4000)
+		expect(stdout.endsWith('end')).toBe(true)
+	})
+
 	it('terminates a subprocess that exceeds its deadline', async () => {
 		await expect(
 			runCommand(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { timeoutMs: 30 }),
