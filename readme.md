@@ -266,6 +266,8 @@ export default defineConfig({
 })
 ```
 
+Importing `defineConfig` requires chagent in the repository's own dependencies. With `npx`, Homebrew, or a global installation, export a plain object instead.
+
 Also supported: `chagent.config.mjs`, `chagent.config.js`, `chagent.config.json`, or a `chagent` key in `package.json`. CLI flags override configured values. `--config` selects a specific file.
 
 Use `packages` and `exclude` directory globs to customize workspace discovery. Use `tagPatterns` to select unusual release tag conventions. Templates support `{name}` and `{version}`; defaults recognize `v1.2.3`, `1.2.3`, `@scope/package@1.2.3`, and `@scope/package/v1.2.3`.
