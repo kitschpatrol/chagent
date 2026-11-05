@@ -1,7 +1,8 @@
 import type { VersionBumpOptions } from 'bumpp'
-import type { GenerateOptions } from './types'
+import type { ChangelogPlan, GenerateOptions } from './types'
 import { generateChangelog } from './generate'
 import { git } from './process'
+import { createProgressLine } from './progress'
 import { reviewChangelog } from './review'
 import { writeChangelog } from './write'
 
@@ -46,39 +47,68 @@ function tagName(
 
 /**
  * Generate changelogs inside bumpp's execute phase and include only their
- * files.
+ * files. Progress and diagnostics go to stderr, unless `onProgress` is given to
+ * handle status messages.
  */
 export function createBumppHook(options: BumppHookOptions = {}): ExecuteHook {
-	const { editor, interactive, ...generateOptions } = options
+	const { editor, interactive, onProgress, ...generateOptions } = options
 	return async (operation) => {
-		let plan = await generateChangelog({
-			...generateOptions,
-			cwd: operation.options.cwd,
-			release: {
-				tag: tagName(
-					operation.options.tag?.name,
-					operation.state.newVersion,
-					operation.state.currentVersion,
-					operation.state.release,
-				),
-				version: operation.state.newVersion,
-			},
-		})
-		if (interactive === true) {
-			const reviewed = await reviewChangelog(plan, { editor })
-			if (reviewed === undefined) {
-				throw new Error('Changelog review cancelled. The release has not been committed or tagged.')
+		const progress =
+			onProgress === undefined && process.stderr.isTTY
+				? createProgressLine(process.stderr)
+				: undefined
+		progress?.start('Reading repository history.')
+		let plan: ChangelogPlan
+		try {
+			plan = await generateChangelog({
+				...generateOptions,
+				cwd: operation.options.cwd,
+				onProgress:
+					onProgress ??
+					((message) => {
+						if (progress === undefined) {
+							process.stderr.write(`${message}\n`)
+						} else {
+							progress.update(message)
+						}
+					}),
+				release: {
+					tag: tagName(
+						operation.options.tag?.name,
+						operation.state.newVersion,
+						operation.state.currentVersion,
+						operation.state.release,
+					),
+					version: operation.state.newVersion,
+				},
+			})
+		} finally {
+			progress?.stop()
+		}
+
+		try {
+			if (interactive === true) {
+				const reviewed = await reviewChangelog(plan, { editor })
+				if (reviewed === undefined) {
+					throw new Error(
+						'Changelog review cancelled. The release has not been committed or tagged.',
+					)
+				}
+
+				plan = reviewed
 			}
 
-			plan = reviewed
-		}
+			const files = await writeChangelog(plan)
+			if (files.length === 0) {
+				return
+			}
 
-		const files = await writeChangelog(plan)
-		if (files.length === 0) {
-			return
+			await git(plan.root, ['add', '--', ...files])
+			operation.update({ updatedFiles: [...new Set([...operation.state.updatedFiles, ...files])] })
+		} finally {
+			for (const diagnostic of plan.diagnostics) {
+				process.stderr.write(`${diagnostic}\n`)
+			}
 		}
-
-		await git(plan.root, ['add', '--', ...files])
-		operation.update({ updatedFiles: [...new Set([...operation.state.updatedFiles, ...files])] })
 	}
 }

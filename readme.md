@@ -228,6 +228,8 @@ export default defineConfig({
 
 For review during releases, use `createBumppHook({ interactive: true })`. Other options include `agent`, `model`, `effort`, `github`, `cache`, and `editor`.
 
+The callback shows progress and diagnostics on stderr. Pass `onProgress` to handle status messages yourself.
+
 Bumpp updates versions before invoking the callback. The callback generates and reviews changelogs, stages only those files, and adds them to bumpp's explicit commit file list. Bumpp then commits and tags the complete release. Its existing push and publishing settings remain under your control.
 
 Avoid putting changelogs in bumpp's version-replacement `files` option: it can replace version references in historical entries.

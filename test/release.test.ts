@@ -1,7 +1,7 @@
 import { versionBump } from 'bumpp'
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AgentAdapter } from '../src/lib/types'
 import { amendRelease } from '../src/lib/amend'
 import { createBumppHook } from '../src/lib/bumpp'
@@ -108,6 +108,44 @@ describe('release integration', () => {
 		await amendRelease(await generateChangelog({ agent, cwd: root, github: false }))
 		expect(await git(root, ['show', 'HEAD:changelog.md'])).toContain('* Support examples.')
 		expect(await git(root, ['status', '--porcelain'])).toBe('')
+	})
+
+	it('reports progress and diagnostics from the bumpp hook on stderr', async () => {
+		const root = await createRepository({ '.gitignore': 'node_modules/\n' })
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'index.js': 'export const answer = 44\n' })
+		await commit(root, 'Improve behavior.')
+		await installFormatter(
+			root,
+			'@kitschpatrol/shared-config',
+			'export async function fixFile() { throw new Error("The formatter failed.") }\n',
+		)
+		let output = ''
+		const stderr = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+			output += String(chunk)
+			return true
+		})
+		const previous = process.cwd()
+		process.chdir(root)
+		try {
+			await versionBump({
+				commit: 'Release: {version}',
+				confirm: false,
+				cwd: root,
+				execute: createBumppHook({ agent, github: false }),
+				ignoreScripts: true,
+				interface: false,
+				push: false,
+				release: '1.0.1',
+				tag: 'v{version}',
+			})
+		} finally {
+			process.chdir(previous)
+			stderr.mockRestore()
+		}
+
+		expect(output).toContain('Researching 2 release ranges in 1 shared agent session.')
+		expect(output).toContain('The formatter failed.')
 	})
 
 	it('stops bumpp before committing or tagging if generation fails', async () => {
