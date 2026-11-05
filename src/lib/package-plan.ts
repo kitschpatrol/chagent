@@ -18,7 +18,7 @@ const checkpointSchema = z.object({
 	instructionVersion: z.literal(instructionVersion),
 	path: z.string(),
 })
-const HEADING_PREFIX = /^#{1,2}\s+/v
+const HEADING_PREFIX = /^#{1,3}\s+/v
 const INLINE_LINK = /\[([^\]]+)\]\([^\)]*\)/gv
 const ANCHOR_PUNCTUATION = /[^\p{L}\p{N}_\s\-]/gv
 const ANCHOR_SPACE = /\s/gv
@@ -98,9 +98,10 @@ export function missingReleases(releases: Release[], content = ''): Release[] {
 	const recorded = sections
 		.filter((section) => section.version !== 'Unreleased')
 		.map((section) => section.version)
-	if (recorded.some((version) => semver.valid(version) === null)) {
+	const unrecognized = recorded.filter((version) => semver.valid(version) === null)
+	if (unrecognized.length > 0) {
 		throw new Error(
-			'The existing changelog has unrecognized release headings. Normalize its release headings before updating it.',
+			`The existing changelog has unrecognized release headings (${unrecognized.join(', ')}). Normalize its release headings before updating it.`,
 		)
 	}
 

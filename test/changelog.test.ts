@@ -26,6 +26,8 @@ describe('changelog parsing', () => {
 		['## 1.0.0 / 2026-01-01'],
 		['## v1.0.0 - 2026-01-01'],
 		['## [1.0.0] - 2026-01-01'],
+		['### [1.0.0](https://example.com/compare/v0.9.0...v1.0.0) (2026-01-01)'],
+		['### 1.0.0'],
 	])('recognizes the release heading %s', (heading) => {
 		const { sections } = parseChangelog(`# Changelog\n\n${heading}\n\n- An entry.\n`)
 		expect(sections.map((section) => section.version)).toEqual(['1.0.0'])
@@ -58,8 +60,17 @@ describe('changelog parsing', () => {
 
 	it('leaves titles, lower headings, and fenced examples alone', () => {
 		const content =
-			'# Changelog for example\n\n### Upgrading to 2.0.0\n\n```md\n## Release 1.0.0\n```\n'
+			'# Changelog for example\n\n### Upgrading to 2.0.0\n\n### Unreleased\n\n### Added\n\n#### 1.0.0\n\n```md\n## Release 1.0.0\n```\n'
 		expect(parseChangelog(content).sections).toEqual([])
+	})
+
+	it('reads standard-version patch headings as releases between their minor releases', () => {
+		const content =
+			'# Changelog\n\n### [1.1.1](https://example.com) (2026-02-01)\n\n### Bug Fixes\n\n* A fix.\n\n## [1.1.0](https://example.com) (2026-01-01)\n\n### Features\n\n* A feature.\n'
+		expect(parseChangelog(content).sections.map((section) => section.version)).toEqual([
+			'1.1.1',
+			'1.1.0',
+		])
 	})
 })
 

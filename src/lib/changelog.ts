@@ -8,7 +8,7 @@ import { categories } from './types'
 export const LINE_BOUNDARY = /(?<=\n)/v
 const FENCE = /^\s{0,3}(`{3,}|~{3,})/v
 const RELEASE_HEADING =
-	/^(#{1,2}) (?:\[([^\]]+)\](?:\([^\)]*\))?|(\S+))(?:\s+(?:[\-–—\/].*|\(.*\)))?$/v
+	/^(#{1,3}) (?:\[([^\]]+)\](?:\([^\)]*\))?|(\S+))(?:\s+(?:[\-–—\/].*|\(.*\)))?$/v
 const TOP_LEVEL_HEADING = /^#{1,2}\s/v
 const VERSION_NUMBER = /\d+\.\d+\.\d+/v
 const REFERENCE = /^\[[^\]]+\]:\s+\S/v
@@ -337,9 +337,13 @@ function releaseHeadingVersion(line: string): string | undefined {
 	}
 
 	const version = normalizeVersion(match[2] ?? match[3]!)
-	// Conventional Changelog uses level-one release headings, but "# Changelog" is a title.
-	const isRelease = match[1] === '##' || version === 'Unreleased' || semver.valid(version) !== null
-	return isRelease ? version : undefined
+	if (semver.valid(version) !== null) {
+		return version
+	}
+
+	// Conventional Changelog uses level-one and, in standard-version, level-three release
+	// headings, but "# Changelog" is a title and "### Added" is a category.
+	return match[1] === '##' || (version === 'Unreleased' && match[1] === '#') ? version : undefined
 }
 
 function sectionSpacing(content: string, newline: string): string {
