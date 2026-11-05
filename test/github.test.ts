@@ -18,7 +18,7 @@ const repository: Repository = {
 	head: 'head',
 	packages: [],
 	root: '/example',
-	rootPackage: { dependencies: [], directory: '.', name: 'example' },
+	rootPackage: { directory: '.', name: 'example' },
 	tags: [],
 }
 

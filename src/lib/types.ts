@@ -126,10 +126,8 @@ export type GenerateOptions = Omit<Config, 'agent'> & {
 }
 
 export type PackageInfo = {
-	dependencies: string[]
 	directory: string
 	name: string
-	node?: string
 	version?: string
 }
 

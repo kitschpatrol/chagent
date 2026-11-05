@@ -161,14 +161,8 @@ function packageInfo(
 	fallback?: string,
 ): PackageInfo {
 	return {
-		dependencies: Object.keys({
-			...manifest?.dependencies,
-			...manifest?.peerDependencies,
-			...manifest?.optionalDependencies,
-		}),
 		directory,
 		name: manifest?.name ?? fallback ?? directory,
-		node: manifest?.engines?.node,
 		version: manifest?.version,
 	}
 }
