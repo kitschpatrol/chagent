@@ -17,6 +17,37 @@ const change: Change = {
 	sources: ['commit'],
 }
 
+describe('changelog parsing', () => {
+	it.each([
+		['## [1.0.0](https://example.com/compare/v0.9.0...v1.0.0) (2026-01-01)'],
+		['# [1.0.0](https://example.com/compare/v0.9.0...v1.0.0) (2026-01-01)'],
+		['## 1.0.0 (2026-01-01)'],
+		['# 1.0.0'],
+		['## 1.0.0 / 2026-01-01'],
+		['## v1.0.0 - 2026-01-01'],
+		['## [1.0.0] - 2026-01-01'],
+	])('recognizes the release heading %s', (heading) => {
+		const { sections } = parseChangelog(`# Changelog\n\n${heading}\n\n- An entry.\n`)
+		expect(sections.map((section) => section.version)).toEqual(['1.0.0'])
+		expect(sections[0]?.heading.trim()).toBe(heading)
+	})
+
+	it.each([['## Release 1.0.0'], ['# Version 1.0.0 notes'], ['## Upgrading to 2.0.0']])(
+		'rejects %s instead of treating it as text',
+		(heading) => {
+			expect(() => parseChangelog(`# Changelog\n\n${heading}\n`)).toThrow(
+				'Unrecognized release heading',
+			)
+		},
+	)
+
+	it('leaves titles, lower headings, and fenced examples alone', () => {
+		const content =
+			'# Changelog for example\n\n### Upgrading to 2.0.0\n\n```md\n## Release 1.0.0\n```\n'
+		expect(parseChangelog(content).sections).toEqual([])
+	})
+})
+
 describe('changelog rendering', () => {
 	it('creates the exact canonical header', () => {
 		const result = updateMarkdown(

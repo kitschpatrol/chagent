@@ -7,7 +7,10 @@ import { categories } from './types'
 
 const LINE_BOUNDARY = /(?<=\n)/v
 const FENCE = /^\s{0,3}(`{3,}|~{3,})/v
-const RELEASE_HEADING = /^## (?:\[([^\]]+)\](?:\([^\)]*\))?|(\S+))(?:\s+[\-–—].*)?$/v
+const RELEASE_HEADING =
+	/^(#{1,2}) (?:\[([^\]]+)\](?:\([^\)]*\))?|(\S+))(?:\s+(?:[\-–—\/].*|\(.*\)))?$/v
+const TOP_LEVEL_HEADING = /^#{1,2}\s/v
+const VERSION_NUMBER = /\d+\.\d+\.\d+/v
 const REFERENCE = /^\[[^\]]+\]:\s+\S/v
 const WHITESPACE = /\s+/gv
 const TERMINAL_PUNCTUATION = /[.!]$/v
@@ -63,16 +66,18 @@ export function parseChangelog(content: string): Changelog {
 				fence = ''
 			}
 		} else if (fence === '') {
-			const match = RELEASE_HEADING.exec(line.trimEnd())
-			if (match) {
-				const raw = match[1] ?? match[2]!
-				const version = normalizeVersion(raw)
+			const version = releaseHeadingVersion(line)
+			if (version !== undefined) {
 				if (sections.some((section) => section.version === version)) {
 					throw new Error(`Duplicate changelog section: ${version}`)
 				}
 
 				sections.push({ body: '', end: content.length, heading: line, start: offset, version })
 				footerStart = content.length
+			} else if (TOP_LEVEL_HEADING.test(line) && VERSION_NUMBER.test(line)) {
+				throw new Error(
+					`Unrecognized release heading: "${line.trim()}". Use a heading such as "## [1.2.3] - 2026-01-01", or demote it below level two.`,
+				)
 			} else if (REFERENCE.test(line) && sections.length > 0 && footerStart === content.length) {
 				footerStart = offset
 			}
@@ -281,6 +286,18 @@ function addNodeNote(header: string, newline: string, nodeException: boolean): s
 
 function normalizeVersion(raw: string): string {
 	return raw.toLowerCase() === 'unreleased' ? 'Unreleased' : (semver.valid(raw) ?? raw)
+}
+
+function releaseHeadingVersion(line: string): string | undefined {
+	const match = RELEASE_HEADING.exec(line.trimEnd())
+	if (match === null) {
+		return undefined
+	}
+
+	const version = normalizeVersion(match[2] ?? match[3]!)
+	// Conventional Changelog uses level-one release headings, but "# Changelog" is a title.
+	const isRelease = match[1] === '##' || version === 'Unreleased' || semver.valid(version) !== null
+	return isRelease ? version : undefined
 }
 
 function sectionSpacing(content: string, newline: string): string {

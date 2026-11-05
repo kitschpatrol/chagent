@@ -32,7 +32,7 @@ const checkpointSchema = z.object({
 	instructionVersion: z.literal(instructionVersion),
 	path: z.string(),
 })
-const HEADING_PREFIX = /^##\s+/v
+const HEADING_PREFIX = /^#{1,2}\s+/v
 const INLINE_LINK = /\[([^\]]+)\]\([^\)]*\)/gv
 const ANCHOR_PUNCTUATION = /[^\p{L}\p{N}_\s\-]/gv
 const ANCHOR_SPACE = /\s/gv

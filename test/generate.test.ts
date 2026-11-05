@@ -136,6 +136,20 @@ describe('generation and writing', () => {
 		)
 	})
 
+	it('treats an existing Conventional Changelog file as already recording its releases', async () => {
+		const original =
+			'# Changelog\n\n# [1.1.0](https://example.com/compare/v1.0.0...v1.1.0) (2026-02-01)\n\n### Features\n\n* A handwritten feature.\n\n## [1.0.0](https://example.com/releases/v1.0.0) (2026-01-01)\n\n### Bug Fixes\n\n* A handwritten fix.\n'
+		const root = await createRepository({ 'changelog.md': original })
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await commit(root, 'Add a feature.')
+		await git(root, ['tag', 'v1.1.0'])
+		const agent = fixtureAgent()
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		expect(plan.files).toEqual([])
+		expect(agent.generate).not.toHaveBeenCalled()
+	})
+
 	it('moves draft notes into a new tagged release without copying them to Unreleased', async () => {
 		const root = await createRepository({
 			'changelog.md':
