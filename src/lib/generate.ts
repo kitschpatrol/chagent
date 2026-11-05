@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { GenerationContext as Context } from './jobs'
 import type { ChangelogPlan, GenerateOptions } from './types'
 import { createAgent } from './agents'
+import { parseChangelog } from './changelog'
 import { loadConfig, resolveConfig } from './config'
 import { enrichReleaseDates } from './evidence'
 import { generateReleases } from './jobs'
@@ -67,5 +68,23 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 		await generateWorkspace(context)
 	}
 
+	if (rebuild) {
+		keepEmptyRebuilds(plan)
+	}
+
 	return plan
+}
+
+/** A rebuild that finds nothing to record must not erase an existing changelog. */
+function keepEmptyRebuilds(plan: ChangelogPlan): void {
+	plan.files = plan.files.filter((edit) => {
+		if (edit.before === undefined || parseChangelog(edit.after).sections.length > 0) {
+			return true
+		}
+
+		plan.diagnostics.push(
+			`The rebuild found nothing to record in ${path.relative(plan.root, edit.path)}, so it was left unchanged.`,
+		)
+		return false
+	})
 }

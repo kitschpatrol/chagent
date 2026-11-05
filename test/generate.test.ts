@@ -347,6 +347,23 @@ describe('generation and writing', () => {
 		).toBe(true)
 	})
 
+	it('keeps an existing changelog when a rebuild finds nothing to record', async () => {
+		const notes = changelogHeader + '\n## Unreleased\n\n### Added\n\n- A handwritten note.\n'
+		const root = await createRepository({ 'changelog.md': notes })
+		const agent = fixtureAgent()
+		agent.generate.mockImplementation(async (request) => {
+			await Promise.resolve()
+			return { releases: request.releases.map(({ id }) => ({ changes: [], id })) }
+		})
+		const plan = await generateChangelog({ agent, cwd: root, github: false, rebuild: true })
+		expect(plan.files).toEqual([])
+		expect(plan.diagnostics).toEqual([
+			'The rebuild found nothing to record in changelog.md, so it was left unchanged.',
+		])
+		await writeChangelog(plan)
+		expect(await readFile(path.join(root, 'changelog.md'), 'utf8')).toBe(notes)
+	})
+
 	it.each([
 		['maxInputChars', { maxInputChars: 100 }],
 		['timeoutMs', { timeoutMs: -1 }],
