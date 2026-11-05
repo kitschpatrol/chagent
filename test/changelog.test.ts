@@ -212,6 +212,36 @@ describe('changelog rendering', () => {
 		).toBe(true)
 	})
 
+	it.each([
+		[
+			'before a later category',
+			'\n### Maintenance\n\n- Tidy.\n',
+			'Added',
+			['Added', 'Maintenance'],
+		],
+		[
+			'between categories',
+			'\n### Added\n\n- New.\n\n### Maintenance\n\n- Tidy.\n',
+			'Fixed',
+			['Added', 'Fixed', 'Maintenance'],
+		],
+		[
+			'after earlier categories',
+			'\n### Added\n\n- New.\n',
+			'Maintenance',
+			['Added', 'Maintenance'],
+		],
+	] as const)('inserts a new category %s', (_label, body, category, order) => {
+		const result = mergeChanges(body, [{ ...change, category }])
+		expect(
+			result
+				.matchAll(/^### (\w+)$/gmv)
+				.map((match) => match[1])
+				.toArray(),
+		).toEqual(order)
+		expect(result).toContain(`### ${category}\n\n- Support custom themes.\n\n`)
+	})
+
 	it('adds bullets to their existing category without replacing human notes', () => {
 		const body = '\n### Added\n\n- A handwritten note.\n\n### Fixed\n\n- A fix.\n\n'
 		const result = mergeChanges(body, [change])

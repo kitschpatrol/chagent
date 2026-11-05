@@ -1,7 +1,7 @@
 import { lstat, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import semver from 'semver'
-import type { Change, Release } from './types'
+import type { Category, Change, Release } from './types'
 import { readOptional } from './repository'
 import { categories } from './types'
 
@@ -155,7 +155,7 @@ export function mergeChanges(body: string, changes: Change[], newline = '\n'): s
 			continue
 		}
 
-		const heading = new RegExp(String.raw`^### ${category}\s*$`, 'mv').exec(result)
+		const heading = categoryHeading(result, category)
 		if (heading) {
 			const after = heading.index + heading[0].length
 			const next = CATEGORY_HEADING.exec(result.slice(after))
@@ -163,21 +163,32 @@ export function mergeChanges(body: string, changes: Change[], newline = '\n'): s
 			const block =
 				result.slice(0, end).trimEnd() + newline + descriptions.join(newline) + newline + newline
 			result = block + result.slice(end)
-		} else {
-			result =
-				result.trimEnd() +
-				newline +
-				newline +
-				`### ${category}` +
-				newline +
-				newline +
-				descriptions.join(newline) +
-				newline +
-				newline
+			continue
 		}
+
+		const block =
+			`### ${category}` + newline + newline + descriptions.join(newline) + newline + newline
+		const position = laterCategoryIndex(result, category)
+		result =
+			position === undefined
+				? result.trimEnd() + newline + newline + block
+				: result.slice(0, position) + block + result.slice(position)
 	}
 
 	return result
+}
+
+function categoryHeading(body: string, category: Category): RegExpExecArray | undefined {
+	return new RegExp(String.raw`^### ${category}\s*$`, 'mv').exec(body) ?? undefined
+}
+
+/** Find where a new category goes to keep the canonical category order. */
+function laterCategoryIndex(body: string, category: Category): number | undefined {
+	const indexes = categories
+		.slice(categories.indexOf(category) + 1)
+		.map((item) => categoryHeading(body, item)?.index)
+		.filter((index) => index !== undefined)
+	return indexes.length === 0 ? undefined : Math.min(...indexes)
 }
 
 /** Render a release heading with an optional comparison link. */
