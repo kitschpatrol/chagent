@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.1.0] - 2026-11-05
 
 ### Added
 
@@ -28,15 +28,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Show session status and elapsed time, expose library `onProgress` and `setLogger` hooks, and provide `--verbose` logging for commands, cache decisions, and timing.
 - Exclude changelogs, package-root generated output, and version-only release bookkeeping from source evidence while retaining lockfile-only maintenance commits.
 - Isolate built-in agent research with restricted permissions, disabled user customizations, and ephemeral sessions.
+- Recognize standard-version’s level-three version headings and identify unrecognized release headings in errors.
+- Format written changelogs with the repository’s local `@kitschpatrol/shared-config` or `@kitschpatrol/prettier-config`, retaining incremental checkpoints across automatic or whitespace-only reformatting.
+- Use local calendar dates for pending releases, bumpp’s `{date}` token, and dates obtained from GitHub releases.
+- Link pending releases using the previous tag’s naming convention, the first configured tag pattern, or `v{version}` as a fallback.
+- Preserve existing changelogs when `--rebuild` finds no release sections to record.
+- Accept empty, comment-only, and settings-only `pnpm-workspace.yaml` files, with descriptive errors naming invalid workspace files.
+- Apply explicit release contexts only to the package containing `cwd`, supporting independently versioned packages released from their own directories.
+- Omit packages without notable changes from shared-version root summaries.
+- Validate Node.js support and timeout limits, and check interactive-review and amendment prerequisites before starting agent research.
+- Report CLI diagnostics on every exit path, with concise failure messages, actionable command and working-directory errors, and plain default logs.
+- Show bumpp-hook progress and diagnostics on stderr, with custom status reporting through `onProgress`.
+- Stop detached agents when an unhandled termination signal ends a library or bumpp host, and cancel CLI sessions on `SIGHUP`.
 
 ### Documentation
 
 - Document local, global, and `npx` installation, agent authentication, CLI help, and library, configuration, monorepo, and rebuild examples.
 - Explain bumpp CLI and hook workflows, interactive editor requirements, and supported post-bump amendment with publication and signing constraints.
 - Explain supported release headings, generated-output exclusions, historical manifest handling, and agent context limits.
+- Document Homebrew installation with `brew install kitschpatrol/tap/chagent`.
+- Explain plain-object configuration for `npx`, Homebrew, and global installations without a local chagent dependency.
+- Explain that automatic formatting runs after preview and review, can reformat historical sections, and preserves written changelogs if formatting fails.
 
 ### Maintenance
 
 - Establish TypeScript builds, shared linting, cross-platform CI, release automation, and integration and property tests.
 - Centralize option resolution and validation, and separate generation orchestration from package and workspace planning.
 - Batch local Git commit, tag, and historical manifest reads to reduce subprocess overhead.
+
+[0.1.0]: https://github.com/kitschpatrol/chagent/releases/tag/v0.1.0
