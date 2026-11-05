@@ -136,6 +136,26 @@ describe('generation and writing', () => {
 		)
 	})
 
+	it('moves draft notes into a new tagged release without copying them to Unreleased', async () => {
+		const root = await createRepository({
+			'changelog.md':
+				changelogHeader +
+				'\n## Unreleased\n\n### Added\n\n- A human note.\n\n## [1.0.0] - 2026-01-01\n\n### Fixed\n\n- Old.\n\n',
+		})
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await commit(root, 'Change the answer.')
+		await git(root, ['tag', 'v1.0.1'])
+		await writeFiles(root, { 'index.js': 'export const answer = 44\n' })
+		await commit(root, 'Change the answer again.')
+		const plan = await generateChangelog({ agent: fixtureAgent(), cwd: root, github: false })
+		const { sections } = parseChangelog(plan.files[0]!.after)
+		expect(sections.map((section) => section.version)).toEqual(['Unreleased', '1.0.1', '1.0.0'])
+		expect(sections[1]?.body).toContain('A human note.')
+		expect(sections[0]?.body).not.toContain('A human note.')
+		expect(sections[0]?.body).toContain('Improve example in Unreleased.')
+	})
+
 	it('keeps incremental Unreleased updates idempotent and preserves saved edits', async () => {
 		const root = await createRepository()
 		await git(root, ['tag', 'v1.0.0'])

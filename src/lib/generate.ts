@@ -142,6 +142,7 @@ async function preparePackage(
 	const parsed = parseChangelog(content ?? '')
 	const draft = parsed.sections.find((section) => section.version === 'Unreleased')
 	const newest = releases.findLast((release) => release.version !== 'Unreleased')
+	const draftPromoted = draft !== undefined && newest !== undefined && missing.includes(newest)
 	const work: PackagePlan['work'] = []
 	const summaries: ReleaseSummary[] = []
 	for (const release of releases) {
@@ -170,8 +171,8 @@ async function preparePackage(
 			continue
 		}
 
-		const promotesDraft = release === newest && shouldWrite && draft !== undefined
-		const existingBody = promotesDraft || release.version === 'Unreleased' ? draft?.body : undefined
+		const ownsDraft = draftPromoted ? release === newest : release.version === 'Unreleased'
+		const existingBody = ownsDraft ? draft?.body : undefined
 		const from =
 			existingBody === undefined
 				? undefined
