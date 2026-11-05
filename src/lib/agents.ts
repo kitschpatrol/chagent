@@ -10,7 +10,7 @@ import type {
 	HistoryChangeSet,
 	HistoryRequest,
 } from './types'
-import { defaultEffort, defaultModels } from './defaults'
+import { defaultModels, defaults } from './defaults'
 import { historyInstructions, instructions } from './instructions'
 import { runCommand } from './process'
 import { categories } from './types'
@@ -117,7 +117,7 @@ async function invokeAgent(
 					'--model',
 					request.model ?? defaultModels.codex,
 					'--config',
-					`model_reasoning_effort=${JSON.stringify(request.effort ?? defaultEffort)}`,
+					`model_reasoning_effort=${JSON.stringify(request.effort ?? defaults.effort)}`,
 					'--config',
 					`features.shell_tool=${String(research)}`,
 					'--config',
@@ -164,7 +164,7 @@ async function invokeAgent(
 					'--model',
 					request.model ?? defaultModels.claude,
 					'--effort',
-					request.effort ?? defaultEffort,
+					request.effort ?? defaults.effort,
 				],
 				{
 					allowFailure: true,

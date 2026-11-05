@@ -16,8 +16,7 @@ import type {
 import { createAgent } from './agents'
 import { hash, readCache } from './cache'
 import { findChangelog, LINE_BOUNDARY, parseChangelog, updateMarkdown } from './changelog'
-import { loadConfig } from './config'
-import { defaultAgent, defaultTimeoutMs } from './defaults'
+import { loadConfig, resolveConfig } from './config'
 import { enrichReleaseDates } from './evidence'
 import { generateJobs, prepareGeneration } from './generation'
 import { instructionVersion } from './instructions'
@@ -58,7 +57,7 @@ function recordCheckpoint(
 	content: string,
 	release?: Release,
 ): void {
-	if (release === undefined || context.options.cache === false) {
+	if (release === undefined || !context.options.cache) {
 		return
 	}
 
@@ -77,7 +76,7 @@ async function incrementalBase(
 	content: string | undefined,
 	release: Release,
 ): Promise<string | undefined> {
-	if (content === undefined || context.options.cache === false) {
+	if (content === undefined || !context.options.cache) {
 		return undefined
 	}
 
@@ -131,7 +130,7 @@ async function preparePackage(
 ): Promise<PackagePlan> {
 	const { repository } = context
 	const file = await findChangelog(path.join(repository.root, pkg.directory))
-	const content = context.options.rebuild === true ? undefined : file.content
+	const content = context.options.rebuild ? undefined : file.content
 	const mode = content === undefined ? 'initialize' : 'update'
 	const releases = await resolveReleases(repository, pkg, context.options, context.options.release)
 	const missing = missingReleases(releases, content)
@@ -334,7 +333,7 @@ async function prepareIndependent(
 ): Promise<IndependentPlan> {
 	const { repository } = context
 	const file = await findChangelog(repository.root)
-	const content = context.options.rebuild === true ? undefined : file.content
+	const content = context.options.rebuild ? undefined : file.content
 	let remaining = content
 	for (const summary of missingPackageSummaries(summaries, content)) {
 		remaining = promotePackageDraft(remaining, summary, repository).content
@@ -444,7 +443,7 @@ async function generateWorkspace(context: Context): Promise<void> {
 	const rootFile = await findChangelog(repository.root)
 	const needsPackageHistory =
 		!shared ||
-		missingReleases(rootReleases, options.rebuild === true ? undefined : rootFile.content).some(
+		missingReleases(rootReleases, options.rebuild ? undefined : rootFile.content).some(
 			(release) => release.version !== 'Unreleased',
 		)
 	const packages: PackagePlan[] = []
@@ -454,7 +453,7 @@ async function generateWorkspace(context: Context): Promise<void> {
 				context,
 				pkg,
 				needsPackageHistory,
-				shared || options.rebuild === true ? undefined : rootFile.content,
+				shared || options.rebuild ? undefined : rootFile.content,
 			),
 		)
 	}
@@ -486,18 +485,21 @@ async function generateWorkspace(context: Context): Promise<void> {
 export async function generateChangelog(options: GenerateOptions = {}): Promise<ChangelogPlan> {
 	const gitRoot = await git(options.cwd ?? process.cwd(), ['rev-parse', '--show-toplevel'])
 	const root = await realpath(gitRoot)
-	const config = await loadConfig(root, options.configFile)
-	const selected = Object.fromEntries(
-		Object.entries(options as Record<string, unknown>).filter(([, value]) => value !== undefined),
-	) as GenerateOptions
-	const resolved = { ...config, ...selected }
-	validateLimits(resolved)
-
-	const repository = await inspectRepository(root, resolved)
-	const agent =
-		typeof resolved.agent === 'object'
-			? resolved.agent
-			: createAgent(resolved.agent ?? defaultAgent)
+	const {
+		agent: selected,
+		configFile,
+		cwd: _cwd,
+		rebuild = false,
+		release,
+		signal,
+		...overrides
+	} = options
+	const config = resolveConfig(
+		await loadConfig(root, configFile),
+		typeof selected === 'string' ? { ...overrides, agent: selected } : overrides,
+	)
+	const repository = await inspectRepository(root, config)
+	const agent = typeof selected === 'object' ? selected : createAgent(config.agent)
 	const plan: ChangelogPlan = {
 		checkpoints: [],
 		diagnostics: [],
@@ -506,17 +508,15 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 		releases: [],
 		root,
 	}
-	const github =
-		resolved.github !== false &&
-		(await enrichReleaseDates(repository, plan.diagnostics, resolved.signal))
+	const github = config.github && (await enrichReleaseDates(repository, plan.diagnostics, signal))
 
 	const context: Context = {
 		agent,
 		cacheDirectory:
-			resolved.cache === false || agent.cacheKey === undefined
-				? undefined
-				: path.join(repository.gitDirectory, 'chagent', 'drafts'),
-		options: { ...resolved, github },
+			config.cache && agent.cacheKey !== undefined
+				? path.join(repository.gitDirectory, 'chagent', 'drafts')
+				: undefined,
+		options: { ...config, github, rebuild, release, signal },
 		plan,
 		repository,
 	}
@@ -533,20 +533,4 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 	}
 
 	return plan
-}
-
-function validateLimits(resolved: GenerateOptions): void {
-	if (
-		(resolved.maxInputChars ?? 80_000) < 4000 ||
-		!Number.isFinite(resolved.maxInputChars ?? 80_000)
-	) {
-		throw new Error('maxInputChars must be a finite number of at least 4000.')
-	}
-
-	if (
-		(resolved.timeoutMs ?? defaultTimeoutMs) <= 0 ||
-		!Number.isFinite(resolved.timeoutMs ?? defaultTimeoutMs)
-	) {
-		throw new Error('timeoutMs must be a positive finite number.')
-	}
 }

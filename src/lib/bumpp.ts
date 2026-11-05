@@ -49,9 +49,10 @@ function tagName(
  * files.
  */
 export function createBumppHook(options: BumppHookOptions = {}): ExecuteHook {
+	const { editor, interactive, ...generateOptions } = options
 	return async (operation) => {
 		let plan = await generateChangelog({
-			...options,
+			...generateOptions,
 			cwd: operation.options.cwd,
 			release: {
 				tag: tagName(
@@ -63,8 +64,8 @@ export function createBumppHook(options: BumppHookOptions = {}): ExecuteHook {
 				version: operation.state.newVersion,
 			},
 		})
-		if (options.interactive === true) {
-			const reviewed = await reviewChangelog(plan, { editor: options.editor })
+		if (interactive === true) {
+			const reviewed = await reviewChangelog(plan, { editor })
 			if (reviewed === undefined) {
 				throw new Error('Changelog review cancelled. The release has not been committed or tagged.')
 			}

@@ -1,5 +1,6 @@
 export { createAgent } from './agents'
 export { amendRelease } from './amend'
+export type { Config } from './config'
 export { defineConfig, loadConfig } from './config'
 export { generateChangelog } from './generate'
 export { setLogger } from './log'
@@ -10,7 +11,6 @@ export type {
 	Category,
 	Change,
 	ChangelogPlan,
-	Config,
 	Effort,
 	Evidence,
 	FileEdit,

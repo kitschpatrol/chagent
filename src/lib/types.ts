@@ -1,3 +1,5 @@
+import type { Config, ResolvedConfig } from './config'
+
 export const categories = [
 	'Added',
 	'Changed',
@@ -10,8 +12,10 @@ export const categories = [
 ] as const
 
 export type Category = (typeof categories)[number]
-export type AgentName = 'claude' | 'codex'
-export type Effort = 'high' | 'low' | 'max' | 'medium' | 'xhigh'
+export const agentNames = ['codex', 'claude'] as const
+export const efforts = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+export type AgentName = (typeof agentNames)[number]
+export type Effort = (typeof efforts)[number]
 
 export type Change = {
 	breaking: boolean
@@ -90,22 +94,6 @@ export type AgentAdapter = {
 	repositoryAccess?: boolean
 }
 
-export type Config = {
-	agent?: AgentName
-	cache?: boolean
-	effort?: Effort
-	exclude?: string[]
-	github?: boolean
-	/** Maximum evidence characters per agent request. */
-	maxInputChars?: number
-	model?: string
-	/** Workspace directory globs, overriding manifest workspace discovery. */
-	packages?: string[]
-	/** Templates containing {version} and optionally {name}. */
-	tagPatterns?: string[]
-	timeoutMs?: number
-}
-
 export type ReleaseContext = {
 	date?: string
 	tag?: string
@@ -121,6 +109,13 @@ export type GenerateOptions = Omit<Config, 'agent'> & {
 	 * sections.
 	 */
 	rebuild?: boolean
+	release?: ReleaseContext
+	signal?: AbortSignal
+}
+
+/** Options after configuration layers and defaults have been applied. */
+export type ResolvedOptions = Omit<ResolvedConfig, 'agent'> & {
+	rebuild: boolean
 	release?: ReleaseContext
 	signal?: AbortSignal
 }

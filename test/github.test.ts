@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { GenerationJob } from '../src/lib/generation'
 import type * as processModule from '../src/lib/process'
 import type { AgentAdapter, Evidence, HistoryRequest, Repository } from '../src/lib/types'
+import { defaults } from '../src/lib/defaults'
 import { enrichWithGithub } from '../src/lib/evidence'
 import { generateChangelog } from '../src/lib/generate'
 import { generateJobs } from '../src/lib/generation'
@@ -185,7 +186,7 @@ describe('batched GitHub enrichment', () => {
 		await generateJobs(
 			{
 				agent,
-				options: { cache: false },
+				options: { ...defaults, cache: false, rebuild: false },
 				plan: {
 					checkpoints: [],
 					diagnostics: [],

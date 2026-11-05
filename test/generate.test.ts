@@ -299,6 +299,33 @@ describe('generation and writing', () => {
 		).toBe(true)
 	})
 
+	it.each([
+		['maxInputChars', { maxInputChars: 100 }],
+		['timeoutMs', { timeoutMs: -1 }],
+		['tagPatterns', { tagPatterns: ['v1'] }],
+	])('rejects an invalid %s from library callers', async (name, options) => {
+		const root = await createRepository()
+		await expect(
+			generateChangelog({ agent: fixtureAgent(), cwd: root, github: false, ...options }),
+		).rejects.toThrow(name)
+	})
+
+	it('names the configuration file when its values are invalid', async () => {
+		const root = await createRepository({ 'chagent.config.json': '{"effort":"extreme"}' })
+		await expect(generateChangelog({ agent: fixtureAgent(), cwd: root })).rejects.toThrow(
+			path.join(root, 'chagent.config.json'),
+		)
+	})
+
+	it('lets library options override the configuration file, except when undefined', async () => {
+		const root = await createRepository({
+			'chagent.config.json': '{"github":false,"effort":"low"}',
+		})
+		const agent = fixtureAgent()
+		await generateChangelog({ agent, cwd: root, effort: undefined, model: 'chosen' })
+		expect(agent.generate.mock.calls[0]?.[0]).toMatchObject({ effort: 'low', model: 'chosen' })
+	})
+
 	it('rejects a symlink substituted for a changelog', async () => {
 		const root = await createRepository()
 		const plan = await generateChangelog({ agent: fixtureAgent(), cwd: root, github: false })

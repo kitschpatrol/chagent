@@ -39,7 +39,7 @@ describe('release integration', () => {
 				commit: 'Release: {version}',
 				confirm: false,
 				cwd: root,
-				execute: createBumppHook({ agent, github: false }),
+				execute: createBumppHook({ agent, editor: 'unused', github: false, interactive: false }),
 				ignoreScripts: true,
 				interface: false,
 				push: false,

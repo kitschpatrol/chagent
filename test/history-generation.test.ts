@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { GenerationContext, GenerationJob } from '../src/lib/generation'
 import type { AgentAdapter, Change, GenerationRequest, HistoryRequest } from '../src/lib/types'
 import { parseChangelog } from '../src/lib/changelog'
+import { defaults } from '../src/lib/defaults'
 import { generateChangelog } from '../src/lib/generate'
 import { generateJobs } from '../src/lib/generation'
 import { git } from '../src/lib/process'
@@ -196,7 +197,7 @@ describe('shared history generation', () => {
 		const context: GenerationContext = {
 			agent,
 			cacheDirectory: path.join(repository.gitDirectory, 'chagent', 'drafts'),
-			options: { github: false, maxInputChars: 4000 },
+			options: { ...defaults, github: false, maxInputChars: 4000, rebuild: false },
 			plan: {
 				checkpoints: [],
 				diagnostics: [],

@@ -3,7 +3,6 @@
 import path from 'node:path'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
-import type { AgentName, Effort } from '../lib'
 import { version } from '../../package.json' with { type: 'json' }
 import {
 	amendRelease,
@@ -13,7 +12,8 @@ import {
 	setLogger,
 	writeChangelog,
 } from '../lib'
-import { defaultAgent, defaultEffort, defaultModels, defaultTimeoutMs } from '../lib/defaults'
+import { defaultModels, defaults } from '../lib/defaults'
+import { agentNames, efforts } from '../lib/types'
 
 setLogger({ ...console, debug: console.error, info: console.error, log: console.error })
 const controller = new AbortController()
@@ -28,9 +28,9 @@ const cli = yargs(hideBin(process.argv))
 
 function explicitArguments<T extends Record<string, unknown>>(args: T): Partial<T> {
 	const { parsed } = cli
-	const defaults = parsed !== false && 'defaulted' in parsed ? parsed.defaulted : undefined
+	const defaulted = parsed !== false && 'defaulted' in parsed ? parsed.defaulted : undefined
 	const keys = new Set(
-		typeof defaults === 'object' && defaults !== null ? Object.keys(defaults) : [],
+		typeof defaulted === 'object' && defaulted !== null ? Object.keys(defaulted) : [],
 	)
 	// Values explicitly supplied by the user remain overrides even when they equal a default.
 	return Object.fromEntries(Object.entries(args).filter(([key]) => !keys.has(key))) as Partial<T>
@@ -51,8 +51,8 @@ try {
 						type: 'string',
 					})
 					.option('agent', {
-						choices: ['codex', 'claude'],
-						default: defaultAgent,
+						choices: agentNames,
+						default: defaults.agent,
 						description: 'Installed agent CLI',
 						type: 'string',
 					})
@@ -62,8 +62,8 @@ try {
 						type: 'string',
 					})
 					.option('effort', {
-						choices: ['low', 'medium', 'high', 'xhigh', 'max'],
-						default: defaultEffort,
+						choices: efforts,
+						default: defaults.effort,
 						description: 'Reasoning effort',
 						type: 'string',
 					})
@@ -94,12 +94,12 @@ try {
 						type: 'boolean',
 					})
 					.option('github', {
-						default: true,
+						default: defaults.github,
 						description: 'Enrich Git evidence using gh when available; disable with --no-github',
 						type: 'boolean',
 					})
 					.option('cache', {
-						default: true,
+						default: defaults.cache,
 						description: 'Cache drafts and incremental state; disable with --no-cache',
 						type: 'boolean',
 					})
@@ -109,7 +109,7 @@ try {
 						type: 'string',
 					})
 					.option('timeout', {
-						default: defaultTimeoutMs / 1000,
+						default: defaults.timeoutMs / 1000,
 						description: 'Agent timeout in seconds',
 						type: 'number',
 					})
@@ -124,11 +124,11 @@ try {
 				// Only explicit flags override repository configuration; the library applies shared defaults.
 				const supplied = explicitArguments(args)
 				let plan = await generateChangelog({
-					agent: supplied.agent as AgentName | undefined,
+					agent: supplied.agent,
 					cache: supplied.cache,
 					configFile: supplied.config,
 					cwd: args.cwd,
-					effort: supplied.effort as Effort | undefined,
+					effort: supplied.effort,
 					github: supplied.github,
 					model: supplied.model,
 					rebuild: args.rebuild,

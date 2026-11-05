@@ -3,18 +3,17 @@ import type {
 	Change,
 	ChangelogPlan,
 	Evidence,
-	GenerateOptions,
 	GenerationRequest,
 	HistoryRequest,
 	PackageInfo,
 	Release,
 	Repository,
+	ResolvedOptions,
 } from './types'
 import { validateChanges, validateHistory } from './agents'
 import { historyBatches, researchEvidence, splitEvidence } from './batches'
 import { readCache, writeCache } from './cache'
 import { mergeChanges } from './changelog'
-import { defaultTimeoutMs } from './defaults'
 import { collectEvidence, enrichWithGithub } from './evidence'
 import { instructionVersion } from './instructions'
 import { log } from './log'
@@ -22,7 +21,7 @@ import { log } from './log'
 export type GenerationContext = {
 	agent: AgentAdapter
 	cacheDirectory?: string
-	options: GenerateOptions
+	options: ResolvedOptions
 	plan: ChangelogPlan
 	repository: Repository
 }
@@ -76,7 +75,7 @@ export async function prepareGeneration(
 			},
 			scope: pkg.directory === '.' && repository.packages.length > 0 ? 'repository' : 'package',
 			signal: options.signal,
-			timeoutMs: options.timeoutMs ?? defaultTimeoutMs,
+			timeoutMs: options.timeoutMs,
 			version: release.version,
 		},
 	}
@@ -87,7 +86,7 @@ function cacheKey(context: GenerationContext, request: GenerationRequest): strin
 		...request,
 		agent: context.agent.cacheKey ?? context.agent.name,
 		instructions: instructionVersion,
-		maxInputChars: context.options.maxInputChars ?? 80_000,
+		maxInputChars: context.options.maxInputChars,
 		signal: undefined,
 	})
 }
@@ -123,7 +122,7 @@ async function saveChanges(
 }
 
 async function enrichJobs(context: GenerationContext, jobs: GenerationJob[]): Promise<void> {
-	if (context.options.github === false) {
+	if (!context.options.github) {
 		return
 	}
 
@@ -156,7 +155,7 @@ async function enrichJobs(context: GenerationContext, jobs: GenerationJob[]): Pr
 
 async function generateOne(context: GenerationContext, job: GenerationJob): Promise<void> {
 	const { agent, options } = context
-	const limit = options.maxInputChars ?? 80_000
+	const limit = options.maxInputChars
 	const batches =
 		agent.repositoryAccess === true
 			? [researchEvidence(job.request.evidence, limit)]
@@ -226,7 +225,7 @@ export async function generateJobs(
 
 	const batches = historyBatches(
 		pending.map((job) => job.request),
-		context.options.maxInputChars ?? 80_000,
+		context.options.maxInputChars,
 	)
 	log.info(
 		`Researching ${pending.length} release ranges in ${batches.length} shared agent session${batches.length === 1 ? '' : 's'}.`,
@@ -239,7 +238,7 @@ export async function generateJobs(
 			releases,
 			repositoryRoot: context.repository.root,
 			signal: context.options.signal,
-			timeoutMs: context.options.timeoutMs ?? defaultTimeoutMs,
+			timeoutMs: context.options.timeoutMs,
 		}
 		const results = validateHistory(
 			{ releases: await context.agent.generateHistory(request) },
