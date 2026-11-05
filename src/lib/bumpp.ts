@@ -13,6 +13,7 @@ export type BumppHookOptions = Omit<GenerateOptions, 'cwd' | 'release'> & {
 	interactive?: boolean
 }
 
+/** Mirror bumpp's tag rendering, which it does not export. */
 function tagName(
 	template: string | undefined,
 	version: string,
@@ -35,10 +36,9 @@ function tagName(
 		tag: '',
 		version,
 	}
-	const named = TAG_TOKEN
-	if (template.match(named) !== null) {
-		tokens.tag = template.replaceAll(named, (_match, key: string) => tokens[key]!)
-		return template.replaceAll(named, (_match, key: string) => tokens[key]!)
+	const rendered = template.replaceAll(TAG_TOKEN, (_match, key: string) => tokens[key]!)
+	if (rendered !== template) {
+		return rendered
 	}
 
 	return template.includes('%s') ? template.replaceAll('%s', () => version) : template + version
