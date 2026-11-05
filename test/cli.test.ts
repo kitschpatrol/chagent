@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -47,7 +47,7 @@ async function installCliFixtures(root: string, delay = 0): Promise<void> {
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 const name = ${JSON.stringify(name)};
-fs.appendFileSync(${JSON.stringify(path.join(root, '.git', 'calls.jsonl'))}, JSON.stringify({name, args}) + '\n');
+fs.appendFileSync(${JSON.stringify(path.join(root, '.git', 'calls.jsonl'))}, JSON.stringify({name, args, pid: process.pid}) + '\n');
 const stdin = fs.readFileSync(0, 'utf8');
 if (name === 'gh') {
   if (args.includes('graphql')) console.log(JSON.stringify({data: {repository: {}}}));
@@ -70,14 +70,41 @@ if (name === 'gh') {
 	vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH ?? ''}`)
 }
 
-async function cliCalls(root: string): Promise<Array<{ args: string[]; name: string }>> {
+async function cliCalls(
+	root: string,
+): Promise<Array<{ args: string[]; name: string; pid: number }>> {
 	const calls = await readFile(path.join(root, '.git', 'calls.jsonl'), 'utf8')
-	return z.array(z.object({ args: z.array(z.string()), name: z.string() })).parse(
+	return z.array(z.object({ args: z.array(z.string()), name: z.string(), pid: z.number() })).parse(
 		calls
 			.trim()
 			.split('\n')
 			.map((line): unknown => JSON.parse(line)),
 	)
+}
+
+// Vitest has no pty, so report a terminal on piped stderr to reach the progress line.
+const FAKE_TERMINAL = `data:text/javascript,${encodeURIComponent(
+	'process.stderr.isTTY = true; process.stderr.columns = 80;',
+)}`
+
+function startInFakeTerminal(root: string, ...args: string[]) {
+	const child = spawn(process.execPath, [`--import=${FAKE_TERMINAL}`, cliPath, ...args], {
+		cwd: root,
+	})
+	const output = { stderr: '', stdout: '' }
+	child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+		output.stderr += chunk
+	})
+	child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+		output.stdout += chunk
+	})
+	const exit = new Promise<number | undefined>((resolve, reject) => {
+		child.once('error', reject)
+		child.once('close', (code) => {
+			resolve(code ?? undefined)
+		})
+	})
+	return { child, exit, output }
 }
 
 describe('cli', () => {
@@ -250,4 +277,78 @@ console.log('Process chatter excluded from the output.');
 		await runCommand(process.execPath, [cliPath], { cwd: root })
 		expect(await readFile(path.join(root, 'changelog.md'), 'utf8')).toBe(file)
 	})
+
+	it('keeps generating when keys arrive on stdin', async () => {
+		const root = await createRepository()
+		await installCliFixtures(root, 500)
+		const { child, exit, output } = startInFakeTerminal(
+			root,
+			'--dry-run',
+			'--no-cache',
+			'--no-github',
+		)
+		child.stdin.write('\u{3}')
+		expect(await exit).toBe(0)
+		expect(output.stdout).toContain('Provide the answer export.')
+	}, 15_000)
+
+	// Windows has no catchable signal to send a child process.
+	it.skipIf(process.platform === 'win32')(
+		'cancels running agents and restores the cursor on interrupt',
+		async () => {
+			const root = await createRepository()
+			await installCliFixtures(root, 60_000)
+			const { child, exit, output } = startInFakeTerminal(root, '--no-cache', '--no-github')
+			const agent = await vi.waitFor(
+				async () => {
+					const calls = await cliCalls(root)
+					const call = calls.find(({ name }) => name === 'codex')
+					expect(call).toBeDefined()
+					return call
+				},
+				{ interval: 50, timeout: 10_000 },
+			)
+			child.kill('SIGINT')
+			expect(await exit).toBe(1)
+			expect(() => process.kill(agent?.pid ?? 0, 0)).toThrow()
+			const cursorRestored = output.stderr.indexOf('\u{1B}[?25h')
+			expect(cursorRestored).toBeGreaterThan(-1)
+			expect(output.stderr.indexOf('codex was cancelled.')).toBeGreaterThan(cursorRestored)
+			await expect(readFile(path.join(root, 'changelog.md'))).rejects.toThrow()
+		},
+		15_000,
+	)
+
+	it.skipIf(process.platform === 'win32')(
+		'restores the cursor on the first interrupt when a stuck run needs a second to exit',
+		async () => {
+			const root = await createRepository()
+			await installCliFixtures(root)
+			// A grandchild in its own process group outlives cancellation and holds the agent's pipes open.
+			await writeFile(
+				path.join(root, '.git', 'test-bin', 'codex'),
+				String.raw`#!/usr/bin/env node
+const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+spawn('sleep', ['5'], { detached: true, stdio: 'inherit' }).unref();
+fs.appendFileSync(${JSON.stringify(path.join(root, '.git', 'calls.jsonl'))}, JSON.stringify({name: 'codex', args: [], pid: process.pid}) + '\n');
+setTimeout(() => {}, 60000);
+`,
+			)
+			const { child, exit, output } = startInFakeTerminal(root, '--no-cache', '--no-github')
+			await vi.waitFor(async () => cliCalls(root), { interval: 50, timeout: 10_000 })
+			child.kill('SIGINT')
+			await vi.waitFor(
+				() => {
+					expect(output.stderr).toContain('\u{1B}[?25h')
+				},
+				{ interval: 50, timeout: 3000 },
+			)
+			expect(child.exitCode).toBeNull()
+			child.kill('SIGINT')
+			expect(await exit).toBeUndefined()
+			expect(child.signalCode).toBe('SIGINT')
+		},
+		15_000,
+	)
 })

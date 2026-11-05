@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { spinner } from '@clack/prompts'
 import path from 'node:path'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
@@ -14,18 +13,24 @@ import {
 	writeChangelog,
 } from '../lib'
 import { defaultModels, defaults } from '../lib/defaults'
+import { createProgressLine } from '../lib/progress'
 import { agentNames, efforts } from '../lib/types'
 
 /**
  * Route library output: a timer on a terminal, plain lines otherwise or when
  * verbose.
  */
-function createReporter(verbose: boolean) {
-	const progress =
-		!verbose && process.stderr.isTTY
-			? spinner({ indicator: 'timer', output: process.stderr })
-			: undefined
-	let status = 'Reading repository history.'
+function createReporter(verbose: boolean, signal: AbortSignal) {
+	const progress = !verbose && process.stderr.isTTY ? createProgressLine(process.stderr) : undefined
+
+	// Restore the cursor right away, since a second interrupt kills the process outright.
+	signal.addEventListener(
+		'abort',
+		() => {
+			progress?.stop()
+		},
+		{ once: true },
+	)
 
 	const logDetail = (...args: unknown[]) => {
 		if (progress === undefined) {
@@ -42,7 +47,6 @@ function createReporter(verbose: boolean) {
 	const logProblem = (...args: unknown[]) => {
 		progress?.clear()
 		console.error(...args)
-		progress?.start(status)
 	}
 
 	setLogger({
@@ -57,15 +61,14 @@ function createReporter(verbose: boolean) {
 
 	return {
 		report(message: string) {
-			status = message
-			progress?.message(message)
+			progress?.update(message)
 		},
 		async track<T>(work: () => Promise<T>): Promise<T> {
-			progress?.start(status)
+			progress?.start('Reading repository history.')
 			try {
 				return await work()
 			} finally {
-				progress?.clear()
+				progress?.stop()
 			}
 		},
 	}
@@ -175,7 +178,7 @@ try {
 					}),
 			async (args) => {
 				// Unset flags stay undefined so repository configuration can apply; the library owns defaults.
-				const reporter = createReporter(args.verbose)
+				const reporter = createReporter(args.verbose, controller.signal)
 				let plan = await reporter.track(async () =>
 					generateChangelog({
 						agent: args.agent,
