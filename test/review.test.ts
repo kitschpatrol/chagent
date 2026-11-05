@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ChangelogPlan } from '../src/lib/types'
 import { changelogHeader } from '../src/lib/changelog'
 import { git } from '../src/lib/process'
-import { reviewChangelog } from '../src/lib/review'
+import { previewChangelog, reviewChangelog } from '../src/lib/review'
 import { writeChangelog } from '../src/lib/write'
 import { createRepository, writeFiles } from './helpers'
 
@@ -51,6 +51,21 @@ async function reviewPlan(): Promise<ChangelogPlan> {
 		root,
 	}
 }
+
+describe('diff preview', () => {
+	it('shows repository paths in headers and leaves similar content alone', async () => {
+		const plan = await reviewPlan()
+		const nested = path.join(plan.root, 'packages/a/changelog.md')
+		plan.files = [{ after: '- See before/packages/a/changelog.md.\n', path: nested }]
+		const preview = await previewChangelog(plan)
+		expect(preview.split('\n', 1)[0]).toBe(
+			'diff --git a/packages/a/changelog.md b/packages/a/changelog.md',
+		)
+		expect(preview).toContain('\n--- a/packages/a/changelog.md\n')
+		expect(preview).toContain('\n+++ b/packages/a/changelog.md\n')
+		expect(preview).toContain('+- See before/packages/a/changelog.md.')
+	})
+})
 
 describe('interactive review', () => {
 	it('applies the saved editor content only after acceptance', async () => {

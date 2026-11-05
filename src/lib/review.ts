@@ -29,6 +29,14 @@ async function scratchFiles(
 	return files
 }
 
+/** Show repository paths in a diff's header, leaving its content untouched. */
+function repositoryPaths(diff: string, file: string, from: string, to: string): string {
+	const hunks = diff.indexOf('\n@@')
+	const header = hunks === -1 ? diff : diff.slice(0, hunks)
+	const body = hunks === -1 ? '' : diff.slice(hunks)
+	return header.replaceAll(from, () => file).replaceAll(to, () => file) + body
+}
+
 /** Produce a unified diff without modifying the repository or index. */
 export async function previewChangelog(plan: ChangelogPlan): Promise<string> {
 	const directory = await mkdtemp(path.join(os.tmpdir(), 'chagent-diff-'))
@@ -36,6 +44,9 @@ export async function previewChangelog(plan: ChangelogPlan): Promise<string> {
 		const files = await scratchFiles(plan, directory)
 		const diffs: string[] = []
 		for (const file of files) {
+			const relative = file.relative.split(path.sep).join('/')
+			const from = `before/${relative}`
+			const to = `after/${relative}`
 			const result = await runCommand(
 				'git',
 				[
@@ -46,20 +57,16 @@ export async function previewChangelog(plan: ChangelogPlan): Promise<string> {
 					'--no-textconv',
 					'--color=never',
 					'--',
-					file.original,
-					file.candidate,
+					from,
+					to,
 				],
-				{ allowFailure: true },
+				{ allowFailure: true, cwd: directory },
 			)
 			if (result.code > 1) {
 				throw new Error(result.stderr)
 			}
 
-			diffs.push(
-				result.stdout
-					.replaceAll(file.original, () => file.relative)
-					.replaceAll(file.candidate, () => file.relative),
-			)
+			diffs.push(repositoryPaths(result.stdout, relative, from, to))
 		}
 
 		return diffs.join('\n')
