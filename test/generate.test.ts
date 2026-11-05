@@ -414,6 +414,7 @@ describe('generation and writing', () => {
 	it.each([
 		['maxInputChars', { maxInputChars: 100 }],
 		['timeoutMs', { timeoutMs: -1 }],
+		['timeoutMs', { timeoutMs: 3_000_000_000 }],
 		['tagPatterns', { tagPatterns: ['v1'] }],
 	])('rejects an invalid %s from library callers', async (name, options) => {
 		const root = await createRepository()

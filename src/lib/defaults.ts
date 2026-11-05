@@ -8,3 +8,6 @@ export const defaults = {
 } as const
 
 export const defaultModels = { claude: 'claude-opus-5-5', codex: 'gpt-6.1-sol' }
+
+/** Node.js timers fire immediately when given a longer delay. */
+export const maxTimeoutMs = 2_147_483_647

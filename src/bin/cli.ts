@@ -14,7 +14,7 @@ import {
 	writeChangelog,
 } from '../lib'
 import { assertAmendable } from '../lib/amend'
-import { defaultModels, defaults } from '../lib/defaults'
+import { defaultModels, defaults, maxTimeoutMs } from '../lib/defaults'
 import { createProgressLine } from '../lib/progress'
 import { assertReviewTerminal } from '../lib/review'
 import { agentNames, efforts } from '../lib/types'
@@ -185,9 +185,13 @@ try {
 					.check((args) => {
 						if (
 							args.timeout !== undefined &&
-							(!Number.isFinite(args.timeout) || args.timeout <= 0)
+							(!Number.isFinite(args.timeout) ||
+								args.timeout <= 0 ||
+								args.timeout * 1000 > maxTimeoutMs)
 						) {
-							throw new Error('--timeout must be a positive number of seconds.')
+							throw new Error(
+								`--timeout must be a positive number of seconds, up to ${Math.floor(maxTimeoutMs / 1000)}.`,
+							)
 						}
 
 						return true

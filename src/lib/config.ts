@@ -1,6 +1,6 @@
 import { cosmiconfig } from 'cosmiconfig'
 import { z } from 'zod'
-import { defaults } from './defaults'
+import { defaults, maxTimeoutMs } from './defaults'
 import { log } from './log'
 import { agentNames, efforts } from './types'
 
@@ -17,7 +17,7 @@ const configSchema = z.strictObject({
 	packages: z.array(z.string()).optional(),
 	/** Templates containing {version} and optionally {name}. */
 	tagPatterns: z.array(z.string().includes('{version}')).optional(),
-	timeoutMs: z.number().positive().optional(),
+	timeoutMs: z.number().positive().max(maxTimeoutMs).optional(),
 })
 
 const resolvedConfigSchema = configSchema.required({

@@ -256,11 +256,14 @@ describe('cli', () => {
 	it('rejects invalid flags and timeout values', async () => {
 		const unknown = await run('--unknown-option')
 		const timeout = await run('--timeout', '-1')
+		const overflow = await run('--timeout', '3000000')
 		expect(unknown.code).toBe(1)
 		expect(unknown.stderr).toContain('Options:')
 		expect(unknown.stderr).toContain('Unknown arguments: unknown-option')
 		expect(timeout.code).toBe(1)
 		expect(timeout.stderr).toContain('positive number')
+		expect(overflow.code).toBe(1)
+		expect(overflow.stderr).toContain('up to 2147483')
 	})
 
 	it.each([
