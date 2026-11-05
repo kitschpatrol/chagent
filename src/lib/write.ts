@@ -1,7 +1,7 @@
 import { lstat, mkdir, open, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { ChangelogPlan, FileEdit } from './types'
-import { hash, writeCache } from './cache'
+import { changelogHash, writeCache } from './cache'
 import { git } from './process'
 import { readOptional } from './repository'
 
@@ -78,7 +78,7 @@ export async function writeChangelog(plan: ChangelogPlan): Promise<string[]> {
 			try {
 				await writeCache(path.join(stateDirectory, 'checkpoints'), checkpoint.path, {
 					...checkpoint,
-					contentHash: edit === undefined ? checkpoint.contentHash : hash(edit.after),
+					contentHash: edit === undefined ? checkpoint.contentHash : changelogHash(edit.after),
 				})
 			} catch {
 				plan.diagnostics.push(

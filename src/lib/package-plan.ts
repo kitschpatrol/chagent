@@ -3,7 +3,7 @@ import semver from 'semver'
 import { z } from 'zod'
 import type { GenerationContext as Context } from './jobs'
 import type { Change, PackageInfo, Release, ReleaseRequest, ReleaseSummary } from './types'
-import { hash, readCache } from './cache'
+import { changelogHash, readCache } from './cache'
 import { findChangelog, parseChangelog, updateMarkdown } from './changelog'
 import { instructionVersion } from './instructions'
 import { prepareRelease } from './jobs'
@@ -54,7 +54,7 @@ export function recordCheckpoint(
 
 	context.plan.checkpoints.push({
 		baseRef: release.previousRef ?? 'initial',
-		contentHash: hash(content),
+		contentHash: changelogHash(content),
 		head: context.repository.head,
 		instructionVersion,
 		path: file,
@@ -80,7 +80,7 @@ export async function incrementalBase(
 	)
 	if (
 		!result.success ||
-		result.data.contentHash !== hash(content) ||
+		result.data.contentHash !== changelogHash(content) ||
 		result.data.baseRef !== (release.previousRef ?? 'initial')
 	) {
 		return undefined

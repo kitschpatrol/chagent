@@ -3,9 +3,16 @@ import { mkdir, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { readOptional } from './repository'
 
-/** Fingerprint generation inputs and file contents. */
+const WHITESPACE = /\s+/gv
+
+/** Fingerprint generation inputs. */
 export function hash(value: string): string {
 	return createHash('sha256').update(value).digest('hex')
+}
+
+/** Fingerprint changelog text, ignoring whitespace that formatters rewrite. */
+export function changelogHash(content: string): string {
+	return hash(content.replaceAll(WHITESPACE, ''))
 }
 
 /** Read disposable cached JSON, tolerating corruption and older formats. */

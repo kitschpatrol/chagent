@@ -1,4 +1,4 @@
-import { readFile, symlink } from 'node:fs/promises'
+import { readFile, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentAdapter, Category, GenerationRequest } from '../src/lib/types'
@@ -219,6 +219,43 @@ describe('generation and writing', () => {
 		expect(await readFile(path.join(root, 'changelog.md'), 'utf8')).toContain(
 			'A better human description.',
 		)
+	})
+
+	it.each([
+		['adding a trailing blank line', (text: string) => text + '\n'],
+		[
+			'adding blank lines between entries',
+			(text: string) => text.replaceAll('\n\n', '\n'.repeat(3)),
+		],
+		['converting to CRLF', (text: string) => text.replaceAll('\n', '\r\n')],
+	])('researches only newer commits after %s in the changelog', async (_label, reformat) => {
+		const root = await createRepository()
+		const agent = fixtureAgent()
+		const first = await generateChangelog({ agent, cwd: root, github: false })
+		await writeChangelog(first)
+		const file = path.join(root, 'changelog.md')
+		await writeFile(file, reformat(await readFile(file, 'utf8')))
+		await writeFiles(root, { 'index.js': 'export const answer = 44\n' })
+		await commit(root, 'Improve behavior.')
+		await generateChangelog({ agent, cwd: root, github: false })
+		const request = agent.generate.mock.calls.at(-1)?.[0].releases[0]
+		expect(request?.repository.from).toBe(first.head)
+		expect(request?.evidence.filter(({ kind }) => kind === 'commit')).toHaveLength(1)
+	})
+
+	it('rechecks the full history after changelog text changes', async () => {
+		const root = await createRepository()
+		const agent = fixtureAgent()
+		await writeChangelog(await generateChangelog({ agent, cwd: root, github: false }))
+		const file = path.join(root, 'changelog.md')
+		const content = await readFile(file, 'utf8')
+		await writeFile(file, content.replace('Improve example in Unreleased.', 'Reworded by hand.'))
+		await writeFiles(root, { 'index.js': 'export const answer = 44\n' })
+		await commit(root, 'Improve behavior.')
+		await generateChangelog({ agent, cwd: root, github: false })
+		const request = agent.generate.mock.calls.at(-1)?.[0].releases[0]
+		expect(request?.repository.from).toBeUndefined()
+		expect(request?.existingEntries).toContain('Reworded by hand.')
 	})
 
 	it.each(['single', 'shared', 'independent'] as const)(
