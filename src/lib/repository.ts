@@ -6,8 +6,11 @@ import { parse } from 'yaml'
 import { z } from 'zod'
 import type { Config, PackageInfo, Release, ReleaseContext, Repository } from './types'
 import { log } from './log'
-import { git, runCommand } from './process'
+import { git, isAncestor } from './process'
 
+/** Matches package manager lockfile paths. */
+export const LOCKFILE_PATH =
+	/(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?)$/v
 const GITHUB_REMOTE = /github\.com[:\/]([^\/]+\/[^\/]+?)(?:\.git)?$/v
 
 const manifestSchema = z.object({
@@ -383,15 +386,9 @@ async function precedingRelease(
 	ref: string,
 ): Promise<Release | undefined> {
 	for (const candidate of candidates.toReversed()) {
-		const result = await runCommand('git', ['merge-base', '--is-ancestor', candidate.ref, ref], {
-			allowFailure: true,
-			cwd: root,
-		})
-		if (result.code !== 0) {
-			continue
+		if (await isAncestor(root, candidate.ref, ref)) {
+			return candidate
 		}
-
-		return candidate
 	}
 
 	return undefined

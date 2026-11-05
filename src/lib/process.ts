@@ -98,3 +98,16 @@ export async function git(root: string, args: string[], allowFailure = false): P
 	})
 	return result.code === 0 ? result.stdout.trimEnd() : ''
 }
+
+/** Check whether one commit is reachable from another. */
+export async function isAncestor(
+	root: string,
+	ancestor: string,
+	descendant: string,
+): Promise<boolean> {
+	const result = await runCommand('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
+		allowFailure: true,
+		cwd: root,
+	})
+	return result.code === 0
+}

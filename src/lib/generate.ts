@@ -15,13 +15,13 @@ import type {
 } from './types'
 import { createAgent } from './agents'
 import { hash, readCache } from './cache'
-import { findChangelog, parseChangelog, updateMarkdown } from './changelog'
+import { findChangelog, LINE_BOUNDARY, parseChangelog, updateMarkdown } from './changelog'
 import { loadConfig } from './config'
 import { defaultAgent, defaultTimeoutMs } from './defaults'
 import { enrichReleaseDates } from './evidence'
 import { generateJobs, prepareGeneration } from './generation'
 import { instructionVersion } from './instructions'
-import { git, runCommand } from './process'
+import { git, isAncestor } from './process'
 import { hasNodeException, inspectRepository, resolveReleases } from './repository'
 import { categories } from './types'
 
@@ -36,7 +36,6 @@ const HEADING_PREFIX = /^#{1,2}\s+/v
 const INLINE_LINK = /\[([^\]]+)\]\([^\)]*\)/gv
 const ANCHOR_PUNCTUATION = /[^\p{L}\p{N}_\s\-]/gv
 const ANCHOR_SPACE = /\s/gv
-const LINE_BOUNDARY = /(?<=\n)/v
 type PackagePlan = {
 	content?: string
 	exception: boolean
@@ -93,12 +92,9 @@ async function incrementalBase(
 		return undefined
 	}
 
-	const ancestor = await runCommand(
-		'git',
-		['merge-base', '--is-ancestor', result.data.head, release.ref],
-		{ allowFailure: true, cwd: context.repository.root },
-	)
-	return ancestor.code === 0 ? result.data.head : undefined
+	return (await isAncestor(context.repository.root, result.data.head, release.ref))
+		? result.data.head
+		: undefined
 }
 
 function missingReleases(releases: Release[], content = ''): Release[] {

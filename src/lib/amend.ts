@@ -1,13 +1,12 @@
 import path from 'node:path'
 import type { ChangelogPlan } from './types'
-import { git, runCommand } from './process'
-import { inspectRepository, isVersionOnlyChange, manifestAt } from './repository'
+import { git, isAncestor, runCommand } from './process'
+import { inspectRepository, isVersionOnlyChange, LOCKFILE_PATH, manifestAt } from './repository'
 import { writeChangelog } from './write'
 
 type Tag = { contents?: string; name: string; object: string }
 const SIGNATURE = /-----BEGIN (?:PGP|SSH) SIGNATURE-----/v
 const RELEASE_MESSAGE = /^(?:release\b|(?:chore|build)(?:\(release\))?:?\s*(?:release\b|v?\d))/iv
-const LOCKFILE = /(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?)$/v
 
 async function assertUnpublished(root: string, head: string, tags: Tag[]): Promise<void> {
 	const remotes = await git(root, ['remote'])
@@ -41,11 +40,7 @@ async function assertUnpublished(root: string, head: string, tags: Tag[]): Promi
 				)
 			}
 
-			const contains = await runCommand('git', ['merge-base', '--is-ancestor', head, object], {
-				allowFailure: true,
-				cwd: root,
-			})
-			if (contains.code === 0) {
+			if (await isAncestor(root, head, object)) {
 				throw new Error(
 					`The release commit is already reachable on ${remote}; refusing to amend it.`,
 				)
@@ -185,7 +180,7 @@ async function assertVersionBump(root: string, head: string): Promise<void> {
 	const files = await git(root, ['diff-tree', '--no-commit-id', '--name-only', '-r', head])
 	let versionChanged = false
 	for (const file of files.split('\n')) {
-		if (path.basename(file).toLowerCase() === 'changelog.md' || LOCKFILE.test(file)) {
+		if (path.basename(file).toLowerCase() === 'changelog.md' || LOCKFILE_PATH.test(file)) {
 			continue
 		}
 

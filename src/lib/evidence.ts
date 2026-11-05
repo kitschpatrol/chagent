@@ -2,11 +2,10 @@ import path from 'node:path'
 import { z } from 'zod'
 import type { Evidence, PackageInfo, Release, Repository } from './types'
 import { git, runCommand } from './process'
-import { isVersionOnlyChange, manifestAt } from './repository'
+import { isVersionOnlyChange, LOCKFILE_PATH, manifestAt } from './repository'
 
 const GENERATED_DIRECTORY = /^(?:build|changelog|coverage|dist)(?:\/|$)/iv
 const GENERATED_ANYWHERE = /(?:^|\/)(?:changelog(?:\.md)?$|node_modules(?:\/|$))/iv
-const LOCKFILE_PATH = /(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?)$/v
 
 /**
  * Generated output lives at the top of a package, so `packages/build` and

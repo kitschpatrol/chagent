@@ -5,7 +5,7 @@ import type { Change, Release } from './types'
 import { readOptional } from './repository'
 import { categories } from './types'
 
-const LINE_BOUNDARY = /(?<=\n)/v
+export const LINE_BOUNDARY = /(?<=\n)/v
 const FENCE = /^\s{0,3}(`{3,}|~{3,})/v
 const RELEASE_HEADING =
 	/^(#{1,2}) (?:\[([^\]]+)\](?:\([^\)]*\))?|(\S+))(?:\s+(?:[\-–—\/].*|\(.*\)))?$/v
@@ -16,7 +16,6 @@ const WHITESPACE = /\s+/gv
 const TERMINAL_PUNCTUATION = /[.!]$/v
 const NEWLINE = /\r?\n/v
 const BULLET = /^\s*[\-*] /v
-const BULLET_PREFIX = /^\s*[\-*] /v
 const CATEGORY_HEADING = /^### /mv
 const SEMVER_LINE = /^.*\[Semantic Versioning\].*(?:\r?\n|$)/mv
 const UNRELEASED_REFERENCE = /^\[unreleased\]:[^\r\n]*(?:\r?\n)?/imv
@@ -115,7 +114,7 @@ export function mergeChanges(body: string, changes: Change[], newline = '\n'): s
 		body
 			.split(NEWLINE)
 			.filter((line) => BULLET.test(line))
-			.map((line) => normalized(line.replace(BULLET_PREFIX, ''))),
+			.map((line) => normalized(line.replace(BULLET, ''))),
 	)
 	for (const category of categories) {
 		const descriptions: string[] = []
