@@ -71,6 +71,7 @@
 		"@types/semver": "^7.8.0",
 		"@types/yargs": "^17.0.35",
 		"bumpp": "^12.3.0",
+		"fast-check": "^4.10.2",
 		"mdat-plugin-cli-help": "^3.4.2",
 		"publint": "^0.3.25",
 		"shx": "^0.4.0",
