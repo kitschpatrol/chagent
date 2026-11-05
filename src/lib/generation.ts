@@ -24,11 +24,6 @@ export type GenerationContext = {
 	repository: Repository
 }
 
-export type GenerationJob = {
-	changes: Change[]
-	request: ReleaseRequest
-}
-
 /**
  * Prepare one release without launching a model, so repository research can be
  * shared.
@@ -41,7 +36,7 @@ export async function prepareGeneration(
 	mode: 'initialize' | 'update',
 	from?: string,
 	onlyRepositoryFiles = false,
-): Promise<GenerationJob> {
+): Promise<ReleaseRequest> {
 	const { options, repository } = context
 	options.signal?.throwIfAborted()
 	const excludeDirectories = onlyRepositoryFiles
@@ -54,23 +49,20 @@ export async function prepareGeneration(
 		excludeDirectories,
 	)
 	return {
-		changes: [],
-		request: {
-			evidence,
-			existingEntries,
-			id: `${pkg.directory}@${release.version}`,
-			initialRelease: release.previousRef === undefined && from === undefined,
-			mode,
-			packageName: pkg.name,
-			repository: {
-				directory: pkg.directory,
-				excludeDirectories,
-				from: from ?? release.previousRef,
-				to: release.ref,
-			},
-			scope: pkg.directory === '.' && repository.packages.length > 0 ? 'repository' : 'package',
-			version: release.version,
+		evidence,
+		existingEntries,
+		id: `${pkg.directory}@${release.version}`,
+		initialRelease: release.previousRef === undefined && from === undefined,
+		mode,
+		packageName: pkg.name,
+		repository: {
+			directory: pkg.directory,
+			excludeDirectories,
+			from: from ?? release.previousRef,
+			to: release.ref,
 		},
+		scope: pkg.directory === '.' && repository.packages.length > 0 ? 'repository' : 'package',
+		version: release.version,
 	}
 }
 
@@ -119,14 +111,17 @@ async function saveChanges(
 	}
 }
 
-async function enrichJobs(context: GenerationContext, jobs: GenerationJob[]): Promise<void> {
+async function withPullRequests(
+	context: GenerationContext,
+	releases: ReleaseRequest[],
+): Promise<ReleaseRequest[]> {
 	if (!context.options.github) {
-		return
+		return releases
 	}
 
 	const commits = new Map<string, Evidence>()
-	for (const job of jobs) {
-		for (const item of job.request.evidence) {
+	for (const release of releases) {
+		for (const item of release.evidence) {
 			if (item.kind === 'commit') {
 				commits.set(item.id, item)
 			}
@@ -140,21 +135,22 @@ async function enrichJobs(context: GenerationContext, jobs: GenerationJob[]): Pr
 		context.options.signal,
 	)
 	const pulls = enriched.filter((item) => item.kind === 'pull-request')
-	for (const job of jobs) {
-		const ids = new Set(job.request.evidence.map((item) => item.id))
-		for (const pull of pulls) {
-			const associated = pull.commits?.filter((commit) => ids.has(commit)) ?? []
-			if (associated.length > 0) {
-				job.request.evidence.push({ ...pull, commits: associated })
-			}
-		}
-	}
+	return releases.map((release) => {
+		const ids = new Set(release.evidence.map((item) => item.id))
+		const associated = pulls
+			.map((pull) => ({
+				...pull,
+				commits: pull.commits?.filter((commit) => ids.has(commit)) ?? [],
+			}))
+			.filter((pull) => pull.commits.length > 0)
+		return { ...release, evidence: [...release.evidence, ...associated] }
+	})
 }
 
-function progressMessage(pending: GenerationJob[], sessions: number): string {
+function progressMessage(pending: ReleaseRequest[], sessions: number): string {
 	const [only] = pending
 	if (only !== undefined && pending.length === 1) {
-		return `Researching ${only.request.packageName} ${only.request.version}.`
+		return `Researching ${only.packageName} ${only.version}.`
 	}
 
 	return `Researching ${pending.length} release ranges in ${sessions} shared agent session${sessions === 1 ? '' : 's'}.`
@@ -163,38 +159,38 @@ function progressMessage(pending: GenerationJob[], sessions: number): string {
 /**
  * Research all outstanding release ranges together before rendering any
  * changelog.
+ *
+ * @returns Changes keyed by release ID. Releases without evidence are absent.
  */
-export async function generateJobs(
+export async function generateReleases(
 	context: GenerationContext,
-	jobs: GenerationJob[],
-): Promise<void> {
+	requests: ReleaseRequest[],
+): Promise<Map<string, Change[]>> {
 	const { agent, options, repository } = context
-	const active = jobs.filter((job) => job.request.evidence.length > 0)
+	const results = new Map<string, Change[]>()
+	const active = requests.filter((release) => release.evidence.length > 0)
 	if (active.length === 0) {
-		return
+		return results
 	}
 
-	await enrichJobs(context, active)
-	const pending = new Map<string, GenerationJob>()
-	for (const job of active) {
-		const cached = await cachedChanges(context, job.request)
+	const enriched = await withPullRequests(context, active)
+	const pending: ReleaseRequest[] = []
+	for (const release of enriched) {
+		const cached = await cachedChanges(context, release)
 		if (cached === undefined) {
-			pending.set(job.request.id, job)
+			pending.push(release)
 		} else {
-			job.changes.push(...cached)
+			results.set(release.id, cached)
 		}
 	}
 
-	if (pending.size === 0) {
-		return
+	if (pending.length === 0) {
+		return results
 	}
 
-	const remaining = pending.values().toArray()
-	const batches = releaseBatches(
-		remaining.map((job) => job.request),
-		options.maxInputChars,
-	)
-	log.info(progressMessage(remaining, batches.length))
+	const unabridged = new Map(pending.map((release) => [release.id, release]))
+	const batches = releaseBatches(pending, options.maxInputChars)
+	log.info(progressMessage(pending, batches.length))
 	for (const releases of batches) {
 		options.signal?.throwIfAborted()
 		const response = await agent.generate({
@@ -208,9 +204,10 @@ export async function generateJobs(
 			},
 		})
 		for (const { changes, id } of validateResponse(response, releases)) {
-			const job = pending.get(id)!
-			job.changes.push(...changes)
-			await saveChanges(context, job.request, job.changes)
+			results.set(id, changes)
+			await saveChanges(context, unabridged.get(id)!, changes)
 		}
 	}
+
+	return results
 }

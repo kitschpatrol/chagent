@@ -1,12 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
-import type { GenerationJob } from '../src/lib/generation'
 import type * as processModule from '../src/lib/process'
-import type { AgentAdapter, Evidence, GenerationRequest, Repository } from '../src/lib/types'
+import type {
+	AgentAdapter,
+	Evidence,
+	GenerationRequest,
+	ReleaseRequest,
+	Repository,
+} from '../src/lib/types'
 import { defaults } from '../src/lib/defaults'
 import { enrichWithGithub } from '../src/lib/evidence'
 import { generateChangelog } from '../src/lib/generate'
-import { generateJobs } from '../src/lib/generation'
+import { generateReleases } from '../src/lib/generation'
 import { git, runCommand } from '../src/lib/process'
 import { createRepository, describeReleases } from './helpers'
 
@@ -161,21 +166,18 @@ describe('batched GitHub enrichment', () => {
 			return { releases: request.releases.map((release) => ({ changes: [], id: release.id })) }
 		})
 		const agent: AgentAdapter = { generate, name: 'fixture' }
-		const jobs: GenerationJob[] = ['first', 'second', 'first'].map((id, index) => ({
-			changes: [],
-			request: {
-				evidence: [commit(id)],
-				existingEntries: '',
-				id: `package-${index}@1.0.0`,
-				initialRelease: false,
-				mode: 'update',
-				packageName: `package-${index}`,
-				repository: { directory: '.', excludeDirectories: [], to: 'head' },
-				scope: 'package',
-				version: '1.0.0',
-			},
+		const requests: ReleaseRequest[] = ['first', 'second', 'first'].map((id, index) => ({
+			evidence: [commit(id)],
+			existingEntries: '',
+			id: `package-${index}@1.0.0`,
+			initialRelease: false,
+			mode: 'update',
+			packageName: `package-${index}`,
+			repository: { directory: '.', excludeDirectories: [], to: 'head' },
+			scope: 'package',
+			version: '1.0.0',
 		}))
-		await generateJobs(
+		await generateReleases(
 			{
 				agent,
 				options: { ...defaults, cache: false, rebuild: false },
@@ -189,7 +191,7 @@ describe('batched GitHub enrichment', () => {
 				},
 				repository,
 			},
-			jobs,
+			requests,
 		)
 		expect(runCommand).toHaveBeenCalledOnce()
 		expect(queries()[0]?.match(/object\(oid:/gv)).toHaveLength(2)

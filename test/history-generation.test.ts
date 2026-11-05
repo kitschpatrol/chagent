@@ -1,12 +1,12 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import type { GenerationContext, GenerationJob } from '../src/lib/generation'
+import type { GenerationContext } from '../src/lib/generation'
 import type { AgentAdapter, GenerationRequest, ReleaseRequest } from '../src/lib/types'
 import { parseChangelog } from '../src/lib/changelog'
 import { defaults } from '../src/lib/defaults'
 import { generateChangelog } from '../src/lib/generate'
-import { generateJobs } from '../src/lib/generation'
+import { generateReleases } from '../src/lib/generation'
 import { git } from '../src/lib/process'
 import { inspectRepository } from '../src/lib/repository'
 import { writeChangelog } from '../src/lib/write'
@@ -198,13 +198,11 @@ describe('shared history generation', () => {
 			scope: 'package',
 			version: `1.0.${index}`,
 		}))
-		const jobs = (): GenerationJob[] => requests.map((request) => ({ changes: [], request }))
-		await expect(generateJobs(context, jobs())).rejects.toThrow('Interrupted.')
+		await expect(generateReleases(context, requests)).rejects.toThrow('Interrupted.')
 		const completed = agent.generate.mock.calls[0]![0].releases.map((release) => release.version)
 		expect(completed.length).toBeGreaterThan(1)
 		agent.generate.mockClear()
-		const retried = jobs()
-		await generateJobs(context, retried)
+		const retried = await generateReleases(context, requests)
 		const researched = agent.generate.mock.calls.flatMap(([request]) =>
 			request.releases.map((release) => release.version),
 		)
@@ -214,6 +212,7 @@ describe('shared history generation', () => {
 				.filter((version) => !completed.includes(version))
 				.toSorted(),
 		)
-		expect(retried.every((job) => job.changes.length === 1)).toBe(true)
+		expect(retried.values().every((changes) => changes.length === 1)).toBe(true)
+		expect(retried.size).toBe(requests.length)
 	})
 })
