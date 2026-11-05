@@ -75,6 +75,57 @@ export async function previewChangelog(plan: ChangelogPlan): Promise<string> {
 	}
 }
 
+function errorText(error: unknown): string {
+	return error instanceof Error ? error.message : String(error)
+}
+
+function changelogProblem(plan: ChangelogPlan): string | undefined {
+	for (const edit of plan.files) {
+		try {
+			parseChangelog(edit.after)
+		} catch (error) {
+			return `${path.relative(plan.root, edit.path)}: ${errorText(error)}`
+		}
+	}
+
+	return undefined
+}
+
+async function openEditor(editor: string, file: string, cwd: string): Promise<void> {
+	// The editor is an explicitly configured command; file paths remain positional arguments.
+	const args =
+		process.platform === 'win32'
+			? ['/d', '/s', '/c', `${editor} "${file}"`]
+			: ['-c', `${editor} "$1"`, 'chagent-editor', file]
+	await runCommand(process.platform === 'win32' ? 'cmd.exe' : 'sh', args, {
+		cwd,
+		inherit: true,
+		timeoutMs: 86_400_000,
+	})
+}
+
+/**
+ * Open each candidate in turn. Saved edits are kept even when they are invalid,
+ * so a retry can continue from them.
+ */
+async function editCandidates(
+	plan: ChangelogPlan,
+	files: Array<{ candidate: string }>,
+	editor: string,
+): Promise<string | undefined> {
+	for (const [index, file] of files.entries()) {
+		try {
+			await openEditor(editor, file.candidate, plan.root)
+		} catch (error) {
+			return `The editor reported a failure. ${errorText(error)}`
+		} finally {
+			plan.files[index]!.after = await readFile(file.candidate, 'utf8')
+		}
+	}
+
+	return undefined
+}
+
 /** Review a diff and optionally edit temporary candidates before applying them. */
 export async function reviewChangelog(
 	plan: ChangelogPlan,
@@ -94,12 +145,16 @@ export async function reviewChangelog(
 	const directory = await mkdtemp(path.join(os.tmpdir(), 'chagent-review-'))
 	try {
 		const files = await scratchFiles(candidate, directory)
+		let editorFailure: string | undefined
 		for (;;) {
 			process.stdout.write(await previewChangelog(candidate))
+			const problem = changelogProblem(candidate)
+			const notice = problem ?? editorFailure
 			const action = await select({
-				message: 'Review changelog changes',
+				message:
+					notice === undefined ? 'Review changelog changes' : `${notice}\nReview changelog changes`,
 				options: [
-					{ label: 'Accept changes', value: 'accept' },
+					...(problem === undefined ? [{ label: 'Accept changes', value: 'accept' }] : []),
 					{ label: 'Edit in the configured editor', value: 'edit' },
 					{ label: 'Cancel', value: 'cancel' },
 				],
@@ -113,21 +168,7 @@ export async function reviewChangelog(
 			}
 
 			const editor = options.editor ?? (await git(plan.root, ['var', 'GIT_EDITOR']))
-			for (const [index, file] of files.entries()) {
-				// The editor is an explicitly configured command; file paths remain positional arguments.
-				const args =
-					process.platform === 'win32'
-						? ['/d', '/s', '/c', `${editor} "${file.candidate}"`]
-						: ['-c', `${editor} "$1"`, 'chagent-editor', file.candidate]
-				await runCommand(process.platform === 'win32' ? 'cmd.exe' : 'sh', args, {
-					cwd: plan.root,
-					inherit: true,
-					timeoutMs: 86_400_000,
-				})
-				const content = await readFile(file.candidate, 'utf8')
-				parseChangelog(content)
-				candidate.files[index]!.after = content
-			}
+			editorFailure = await editCandidates(candidate, files, editor)
 		}
 	} finally {
 		await rm(directory, { force: true, recursive: true })

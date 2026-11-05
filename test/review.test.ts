@@ -8,7 +8,11 @@ import { previewChangelog, reviewChangelog } from '../src/lib/review'
 import { writeChangelog } from '../src/lib/write'
 import { createRepository, writeFiles } from './helpers'
 
-const { select } = vi.hoisted(() => ({ select: vi.fn() }))
+type SelectPrompt = { message: string; options: Array<{ value: string }> }
+
+const { select } = vi.hoisted(() => ({
+	select: vi.fn<(prompt: SelectPrompt) => Promise<unknown>>(),
+}))
 vi.mock('@clack/prompts', () => ({
 	isCancel: (value: unknown) => typeof value === 'symbol',
 	select,
@@ -83,6 +87,52 @@ describe('interactive review', () => {
 		await expect(readFile(plan.files[0]!.path)).rejects.toThrow()
 		await writeChangelog(reviewed!)
 		expect(await readFile(plan.files[0]!.path, 'utf8')).toContain('Human description.')
+	})
+
+	it('keeps hand edits and withholds acceptance when a saved changelog is invalid', async () => {
+		const plan = await reviewPlan()
+		await writeFiles(plan.root, {
+			'editor.cjs': String.raw`
+const fs = require('node:fs');
+const file = process.argv[2];
+const content = fs.readFileSync(file, 'utf8');
+fs.writeFileSync(file, content.includes('Human description.')
+  ? content.replace('\n## Unreleased\n\nA duplicate.\n', '')
+  : content.replace('Generated description.', 'Human description.') + '\n## Unreleased\n\nA duplicate.\n');
+`,
+		})
+		select
+			.mockResolvedValueOnce('edit')
+			.mockResolvedValueOnce('edit')
+			.mockResolvedValueOnce('accept')
+		const reviewed = await reviewChangelog(plan, {
+			editor: `"${process.execPath}" "${path.join(plan.root, 'editor.cjs')}"`,
+		})
+		const values = select.mock.calls.map(([prompt]) => prompt.options.map((option) => option.value))
+		expect(values).toEqual([
+			['accept', 'edit', 'cancel'],
+			['edit', 'cancel'],
+			['accept', 'edit', 'cancel'],
+		])
+		const messages = select.mock.calls.map(([prompt]) => prompt.message)
+		expect(messages[1]).toContain('Duplicate changelog section')
+		expect(reviewed?.files[0]?.after).toContain('Human description.')
+		expect(reviewed?.files[0]?.after).not.toContain('A duplicate.')
+	})
+
+	it('keeps saved edits and continues the review when the editor exits with a failure', async () => {
+		const plan = await reviewPlan()
+		await writeFiles(plan.root, {
+			'editor.cjs':
+				"const fs = require('node:fs'); const file = process.argv[2]; fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('Generated description.', 'Human description.')); process.exit(3);",
+		})
+		select.mockResolvedValueOnce('edit').mockResolvedValueOnce('accept')
+		const reviewed = await reviewChangelog(plan, {
+			editor: `"${process.execPath}" "${path.join(plan.root, 'editor.cjs')}"`,
+		})
+		const [, prompt] = select.mock.calls.map(([item]) => item)
+		expect(prompt?.message).toContain('The editor reported a failure')
+		expect(reviewed?.files[0]?.after).toContain('Human description.')
 	})
 
 	it('cancels without writing repository files', async () => {
