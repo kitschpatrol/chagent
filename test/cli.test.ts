@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
@@ -241,8 +241,21 @@ describe('cli', () => {
 		const unknown = await run('--unknown-option')
 		const timeout = await run('--timeout', '-1')
 		expect(unknown.code).toBe(1)
+		expect(unknown.stderr).toContain('Options:')
+		expect(unknown.stderr).toContain('Unknown arguments: unknown-option')
 		expect(timeout.code).toBe(1)
 		expect(timeout.stderr).toContain('positive number')
+	})
+
+	it('reports a failure while running as its message alone', async () => {
+		const root = await createRepository()
+		await rm(path.join(root, '.git'), { force: true, recursive: true })
+		const { code, stderr, stdout } = await run('--cwd', root, '--no-github')
+		expect(code).toBe(1)
+		expect(stdout).toBe('')
+		expect(stderr.trim().split('\n')).toEqual([
+			expect.stringContaining('not a git repository'),
+		])
 	})
 
 	it('runs without flags and writes a canonical changelog without committing', async () => {

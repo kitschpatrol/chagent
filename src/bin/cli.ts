@@ -236,6 +236,15 @@ try {
 		.alias('v', 'version')
 		.help()
 		.strict()
+		.fail((message, error: Error | undefined, instance) => {
+			// Usage mistakes get help; failures while running get only their message.
+			if (error !== undefined) {
+				throw error
+			}
+
+			instance.showHelp()
+			throw new Error(message)
+		})
 		.wrap(process.stdout.isTTY ? Math.min(120, cli.terminalWidth()) : 0)
 		.parse()
 } catch (error) {
