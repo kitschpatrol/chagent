@@ -92,15 +92,18 @@ function changelogProblem(plan: ChangelogPlan): string | undefined {
 }
 
 async function openEditor(editor: string, file: string, cwd: string): Promise<void> {
-	// The editor is an explicitly configured command; file paths remain positional arguments.
-	const args =
-		process.platform === 'win32'
-			? ['/d', '/s', '/c', `${editor} "${file}"`]
-			: ['-c', `${editor} "$1"`, 'chagent-editor', file]
-	await runCommand(process.platform === 'win32' ? 'cmd.exe' : 'sh', args, {
+	// The editor is an explicitly configured command; on POSIX, file paths remain positional
+	// arguments. cmd.exe parses its own command line, so it gets one verbatim, wrapped in the
+	// outer quotes that /s strips.
+	const windows = process.platform === 'win32'
+	const args = windows
+		? ['/d', '/s', '/c', `"${editor} "${file}""`]
+		: ['-c', `${editor} "$1"`, 'chagent-editor', file]
+	await runCommand(windows ? 'cmd.exe' : 'sh', args, {
 		cwd,
 		inherit: true,
 		timeoutMs: 86_400_000,
+		windowsVerbatimArguments: windows,
 	})
 }
 

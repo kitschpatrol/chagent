@@ -81,6 +81,8 @@ type CommandOptions = {
 	/** Keep only the end of stdout, for long event streams that nothing parses. */
 	tailStdout?: boolean
 	timeoutMs?: number
+	/** Skip Windows argument quoting, for commands that parse their own. */
+	windowsVerbatimArguments?: boolean
 }
 
 /**
@@ -114,6 +116,7 @@ export async function runCommand(
 			env: options.env ?? process.env,
 			stdio: options.inherit === true ? 'inherit' : 'pipe',
 			windowsHide: true,
+			windowsVerbatimArguments: options.windowsVerbatimArguments,
 		})
 		const group = detached ? child.pid : undefined
 		if (group !== undefined) {
