@@ -34,7 +34,7 @@ const HELP_DEFAULTS = [
 	/--effort[^\n]*\[default: xhigh\]/v,
 	/--github[^\n]*\[default: true\]/v,
 	/--cache[^\n]*\[default: true\]/v,
-	/--timeout[^\n]*\[default: 1200\]/v,
+	/--timeout[^\n]*\[default: 20\]/v,
 ]
 
 async function installCliFixtures(root: string, delay = 0): Promise<void> {
@@ -236,7 +236,7 @@ describe('cli', () => {
 
 	it('uses the configured timeout unless --timeout explicitly overrides it', async () => {
 		const root = await createRepository({
-			'chagent.config.json': '{"cache":false,"github":false,"timeoutMs":50}',
+			'chagent.config.json': '{"cache":false,"github":false,"timeout":0.001}',
 		})
 		await installCliFixtures(root, 250)
 		const configured = await runCommand(process.execPath, [cliPath, '--dry-run'], {
@@ -245,25 +245,23 @@ describe('cli', () => {
 		})
 		expect(configured.code).toBe(1)
 		expect(configured.stderr).toContain('codex timed out')
-		const overridden = await runCommand(
-			process.execPath,
-			[cliPath, '--dry-run', '--timeout=1200'],
-			{ cwd: root },
-		)
+		const overridden = await runCommand(process.execPath, [cliPath, '--dry-run', '--timeout=20'], {
+			cwd: root,
+		})
 		expect(overridden.stdout).toContain('Provide the answer export.')
 	})
 
 	it('rejects invalid flags and timeout values', async () => {
 		const unknown = await run('--unknown-option')
 		const timeout = await run('--timeout', '-1')
-		const overflow = await run('--timeout', '3000000')
+		const overflow = await run('--timeout', '40000')
 		expect(unknown.code).toBe(1)
 		expect(unknown.stderr).toContain('Options:')
 		expect(unknown.stderr).toContain('Unknown arguments: unknown-option')
 		expect(timeout.code).toBe(1)
 		expect(timeout.stderr).toContain('positive number')
 		expect(overflow.code).toBe(1)
-		expect(overflow.stderr).toContain('up to 2147483')
+		expect(overflow.stderr).toContain('up to 35791')
 	})
 
 	it.each([

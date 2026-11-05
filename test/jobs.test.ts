@@ -9,7 +9,7 @@ import type {
 	ReleaseRequest,
 } from '../src/lib/types'
 import { parseChangelog } from '../src/lib/changelog'
-import { defaults } from '../src/lib/defaults'
+import { resolveConfig } from '../src/lib/config'
 import { generateChangelog } from '../src/lib/generate'
 import { generateReleases } from '../src/lib/jobs'
 import { git } from '../src/lib/process'
@@ -216,7 +216,7 @@ describe('shared history generation', () => {
 			agent,
 			cacheDirectory: path.join(repository.gitDirectory, 'chagent', 'drafts'),
 			options: {
-				...defaults,
+				...resolveConfig(),
 				github: false,
 				maxInputChars: 4000,
 				rebuild: false,

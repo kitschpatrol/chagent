@@ -1,6 +1,6 @@
 import { cosmiconfig } from 'cosmiconfig'
 import { z } from 'zod'
-import { defaults, maxTimeoutMs } from './defaults'
+import { defaults, maxTimeoutMinutes } from './defaults'
 import { log } from './log'
 import { agentNames, efforts } from './types'
 
@@ -17,17 +17,20 @@ const configSchema = z.strictObject({
 	packages: z.array(z.string()).optional(),
 	/** Templates containing {version} and optionally {name}. */
 	tagPatterns: z.array(z.string().includes('{version}')).optional(),
-	timeoutMs: z.number().positive().max(maxTimeoutMs).optional(),
+	/** Minutes each agent session may run. */
+	timeout: z.number().positive().max(maxTimeoutMinutes).optional(),
 })
 
-const resolvedConfigSchema = configSchema.required({
-	agent: true,
-	cache: true,
-	effort: true,
-	github: true,
-	maxInputChars: true,
-	timeoutMs: true,
-})
+const resolvedConfigSchema = configSchema
+	.required({
+		agent: true,
+		cache: true,
+		effort: true,
+		github: true,
+		maxInputChars: true,
+		timeout: true,
+	})
+	.transform(({ timeout, ...config }) => ({ ...config, timeoutMs: timeout * 60_000 }))
 
 export type Config = z.infer<typeof configSchema>
 export type ResolvedConfig = z.infer<typeof resolvedConfigSchema>

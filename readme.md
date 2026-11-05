@@ -146,7 +146,7 @@ chagent
 | `--github`              | Enrich Git evidence using gh when available; disable with --no-github | `boolean`                                     | `true`                                        |
 | `--cache`               | Cache drafts and incremental state; disable with --no-cache           | `boolean`                                     | `true`                                        |
 | `--config`              | Configuration file path                                               | `string`                                      | auto-detected from repository root            |
-| `--timeout`             | Agent timeout in seconds                                              | `number`                                      | `1200`                                        |
+| `--timeout`             | Agent timeout in minutes                                              | `number`                                      | `20`                                          |
 | `--verbose`             | Log commands, cache decisions, and session details to stderr          | `boolean`                                     | `false`                                       |
 | `--help`<br>`-h`        | Show help                                                             | `boolean`                                     |                                               |
 | `--version`<br>`-v`     | Show version number                                                   | `boolean`                                     |                                               |
@@ -266,7 +266,7 @@ export default defineConfig({
   github: true,
   maxInputChars: 80_000,
   model: 'gpt-6.1-sol',
-  timeoutMs: 1_200_000,
+  timeout: 20,
 })
 ```
 
@@ -284,7 +284,7 @@ Chagent reads reachable version tags and commit history regardless of the projec
 
 GitHub enrichment uses release dates and commit-associated PR information. PR lookups batch unique commits across all requested releases and packages; each release receives only its associated PRs. **GitHub release-note bodies are never generation inputs.** Changelog files and generated build output are excluded from source evidence. Existing changelog prose is supplied only to preserve edits and avoid duplicate entries.
 
-The agent chooses which historical source files, public interfaces, documentation, and build configuration to inspect. It reads Git snapshots at the supplied release refs instead of treating current or uncommitted files as historical evidence. `maxInputChars` bounds the starting context supplied to agents; it does not restrict which repository files they can investigate. Requests prioritize release boundaries and existing human entries, then fit optional starting evidence into the remaining budget. An individual release's existing entries are never truncated. `timeoutMs` applies to each agent session. Lockfile maintenance retains its commit intent, while pure npm version-bump bookkeeping is excluded.
+The agent chooses which historical source files, public interfaces, documentation, and build configuration to inspect. It reads Git snapshots at the supplied release refs instead of treating current or uncommitted files as historical evidence. `maxInputChars` bounds the starting context supplied to agents; it does not restrict which repository files they can investigate. Requests prioritize release boundaries and existing human entries, then fit optional starting evidence into the remaining budget. An individual release's existing entries are never truncated. `timeout` sets the minutes each agent session may run. Lockfile maintenance retains its commit intent, while pure npm version-bump bookkeeping is excluded.
 
 Agents return structured changes with evidence references. Stray whitespace and list markers in descriptions are normalized. A response that still fails validation gets one correction request; a second failure stops the run before anything is written or cached. Application code owns the header, release boundaries, Markdown insertion, and Git writes. Agents run in the repository: Codex uses a read-only sandbox with approval requests disabled; Claude exposes read/search and Bash tools in [`dontAsk` mode](https://code.claude.com/docs/en/permissions), which allows read-only commands and denies actions requiring permission. Customizations are disabled for these invocations. Only chagent writes the reviewed changelog. Repository content is sent to the selected agent service using your existing account.
 

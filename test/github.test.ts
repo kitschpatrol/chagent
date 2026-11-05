@@ -8,7 +8,7 @@ import type {
 	ReleaseRequest,
 	Repository,
 } from '../src/lib/types'
-import { defaults } from '../src/lib/defaults'
+import { resolveConfig } from '../src/lib/config'
 import { enrichWithGithub } from '../src/lib/evidence'
 import { generateChangelog } from '../src/lib/generate'
 import { generateReleases } from '../src/lib/jobs'
@@ -180,7 +180,7 @@ describe('batched GitHub enrichment', () => {
 		await generateReleases(
 			{
 				agent,
-				options: { ...defaults, cache: false, rebuild: false, releaseDirectory: '.' },
+				options: { ...resolveConfig(), cache: false, rebuild: false, releaseDirectory: '.' },
 				plan: {
 					checkpoints: [],
 					diagnostics: [],

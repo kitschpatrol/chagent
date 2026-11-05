@@ -413,8 +413,8 @@ describe('generation and writing', () => {
 
 	it.each([
 		['maxInputChars', { maxInputChars: 100 }],
-		['timeoutMs', { timeoutMs: -1 }],
-		['timeoutMs', { timeoutMs: 3_000_000_000 }],
+		['timeout', { timeout: -1 }],
+		['timeout', { timeout: 50_000 }],
 		['tagPatterns', { tagPatterns: ['v1'] }],
 	])('rejects an invalid %s from library callers', async (name, options) => {
 		const root = await createRepository()
@@ -442,14 +442,25 @@ describe('generation and writing', () => {
 		})
 	})
 
+	it('gives agent sessions the timeout in milliseconds', async () => {
+		const root = await createRepository()
+		const agent = fixtureAgent()
+		const options = { agent, cache: false, cwd: root, github: false }
+		await generateChangelog(options)
+		await generateChangelog({ ...options, timeout: 1.5 })
+		expect(agent.generate.mock.calls.map(([request]) => request.settings.timeoutMs)).toEqual([
+			1_200_000, 90_000,
+		])
+	})
+
 	it('reuses drafts when only the timeout changes, and regenerates when the effort changes', async () => {
 		const root = await createRepository()
 		const agent = fixtureAgent()
 		const options = { agent, cwd: root, github: false }
-		await generateChangelog({ ...options, timeoutMs: 1000 })
-		await generateChangelog({ ...options, timeoutMs: 2000 })
+		await generateChangelog({ ...options, timeout: 1 })
+		await generateChangelog({ ...options, timeout: 2 })
 		expect(agent.generate).toHaveBeenCalledOnce()
-		await generateChangelog({ ...options, effort: 'low', timeoutMs: 2000 })
+		await generateChangelog({ ...options, effort: 'low', timeout: 2 })
 		expect(agent.generate).toHaveBeenCalledTimes(2)
 	})
 

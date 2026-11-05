@@ -14,7 +14,7 @@ import {
 	writeChangelog,
 } from '../lib'
 import { assertAmendable } from '../lib/amend'
-import { defaultModels, defaults, maxTimeoutMs } from '../lib/defaults'
+import { defaultModels, defaults, maxTimeoutMinutes } from '../lib/defaults'
 import { createProgressLine } from '../lib/progress'
 import { assertReviewTerminal } from '../lib/review'
 import { agentNames, efforts } from '../lib/types'
@@ -173,8 +173,8 @@ try {
 						type: 'string',
 					})
 					.option('timeout', {
-						defaultDescription: String(defaults.timeoutMs / 1000),
-						description: 'Agent timeout in seconds',
+						defaultDescription: String(defaults.timeout),
+						description: 'Agent timeout in minutes',
 						type: 'number',
 					})
 					.option('verbose', {
@@ -187,10 +187,10 @@ try {
 							args.timeout !== undefined &&
 							(!Number.isFinite(args.timeout) ||
 								args.timeout <= 0 ||
-								args.timeout * 1000 > maxTimeoutMs)
+								args.timeout > maxTimeoutMinutes)
 						) {
 							throw new Error(
-								`--timeout must be a positive number of seconds, up to ${Math.floor(maxTimeoutMs / 1000)}.`,
+								`--timeout must be a positive number of minutes, up to ${Math.floor(maxTimeoutMinutes)}.`,
 							)
 						}
 
@@ -221,7 +221,7 @@ try {
 						},
 						rebuild: args.rebuild,
 						signal: controller.signal,
-						timeoutMs: args.timeout === undefined ? undefined : args.timeout * 1000,
+						timeout: args.timeout,
 					}),
 				)
 				try {
