@@ -1,5 +1,5 @@
 import { versionBump } from 'bumpp'
-import { readFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentAdapter } from '../src/lib/types'
@@ -28,6 +28,17 @@ const agent: AgentAdapter = {
 	},
 	name: 'fixture',
 }
+const bumpedManifest = '{"name":"example","version":"1.0.1","engines":{"node":">=18"}}'
+
+/** Create an unpublished, version-only release commit at HEAD. */
+async function releaseCommit(files: Record<string, string> = {}): Promise<string> {
+	const root = await createRepository()
+	await git(root, ['tag', 'v1.0.0'])
+	await writeFiles(root, { 'package.json': bumpedManifest, ...files })
+	await commit(root, 'Release: 1.0.1')
+	return root
+}
+
 describe('release integration', () => {
 	it('includes new changelogs in the bumpp commit and tag without consuming unrelated staged work', async () => {
 		const root = await createRepository({ 'unrelated.txt': 'original\n' })
@@ -137,5 +148,71 @@ describe('release integration', () => {
 		await expect(amendRelease(plan)).rejects.toThrow('already advertised')
 		expect(await git(root, ['rev-parse', 'HEAD'])).toBe(plan.head)
 		await expect(readFile(path.join(root, 'changelog.md'))).rejects.toThrow()
+	})
+
+	it('restores the original commit when a tag moves during amendment', async () => {
+		const root = await releaseCommit()
+		await git(root, ['tag', 'v1.0.1'])
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		const hooks = path.join(root, '.git', 'no-hooks')
+		await mkdir(hooks, { recursive: true })
+		const hook = path.join(hooks, 'post-commit')
+		await writeFile(hook, '#!/bin/sh\ngit tag --force v1.0.1 v1.0.0\n')
+		await chmod(hook, 0o755)
+		await expect(amendRelease(plan)).rejects.toThrow('Could not retarget the release tags')
+		expect(await git(root, ['rev-parse', 'HEAD'])).toBe(plan.head)
+		expect(await readFile(path.join(root, 'changelog.md'), 'utf8')).toContain('Support examples.')
+	})
+
+	it('refuses to move a signed tag', async () => {
+		const root = await releaseCommit()
+		await git(root, [
+			'tag',
+			'-a',
+			'v1.0.1',
+			'-m',
+			'Release.\n\n-----BEGIN PGP SIGNATURE-----\nNot a real signature.\n-----END PGP SIGNATURE-----',
+		])
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		await expect(amendRelease(plan)).rejects.toThrow('Tag v1.0.1 is signed')
+		expect(await git(root, ['rev-parse', 'HEAD'])).toBe(plan.head)
+		await expect(readFile(path.join(root, 'changelog.md'))).rejects.toThrow()
+	})
+
+	it('refuses to move an unrelated tag at HEAD', async () => {
+		const root = await releaseCommit()
+		await git(root, ['tag', 'deployed-to-production'])
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		await expect(amendRelease(plan)).rejects.toThrow('unrelated tag (deployed-to-production)')
+	})
+
+	it('refuses a release commit that changes other files', async () => {
+		const root = await releaseCommit({ 'index.js': 'export const answer = 43\n' })
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		await expect(amendRelease(plan)).rejects.toThrow('also changes index.js')
+	})
+
+	it('refuses a release commit that changes more than the manifest version', async () => {
+		const root = await releaseCommit({
+			'package.json': '{"name":"example","version":"1.0.1","engines":{"node":">=20"}}',
+		})
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		await expect(amendRelease(plan)).rejects.toThrow('changes more than the version')
+	})
+
+	it('refuses a commit that does not look like a release', async () => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'package.json': bumpedManifest })
+		await commit(root, 'Tweak the package.')
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		await expect(amendRelease(plan)).rejects.toThrow('recognizable release commit message')
+	})
+
+	it('refuses a detached HEAD', async () => {
+		const root = await releaseCommit()
+		await git(root, ['checkout', '-q', '--detach'])
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		await expect(amendRelease(plan)).rejects.toThrow('checked-out branch')
 	})
 })
