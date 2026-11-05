@@ -41,6 +41,21 @@ describe('changelog parsing', () => {
 		},
 	)
 
+	it('rejects an unclosed code fence instead of hiding the headings after it', () => {
+		expect(() => parseChangelog('# Changelog\n\n```\n\n## 1.0.0\n\n- An entry.\n')).toThrow(
+			'Unclosed code fence',
+		)
+	})
+
+	it('closes a fence only with a matching marker and no info string', () => {
+		const content =
+			'## 2.0.0\n\n```md\n```js\n## 9.0.0\n```\n\n~~~\n```\n## 8.0.0\n~~~\n\n````\n```\n## 7.0.0\n````\n\n## 1.0.0\n'
+		expect(parseChangelog(content).sections.map((section) => section.version)).toEqual([
+			'2.0.0',
+			'1.0.0',
+		])
+	})
+
 	it('leaves titles, lower headings, and fenced examples alone', () => {
 		const content =
 			'# Changelog for example\n\n### Upgrading to 2.0.0\n\n```md\n## Release 1.0.0\n```\n'

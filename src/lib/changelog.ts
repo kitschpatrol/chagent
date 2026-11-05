@@ -49,6 +49,24 @@ export async function findChangelog(
 	return { content: await readOptional(file), path: file }
 }
 
+/**
+ * Track the open code fence; only a matching marker with no info string closes
+ * it.
+ */
+function nextFence(line: string, fence: string): string {
+	const match = FENCE.exec(line)
+	if (match === null) {
+		return fence
+	}
+
+	const marker = match[1]!
+	if (fence === '') {
+		return marker
+	}
+
+	return marker.startsWith(fence) && line.slice(match[0].length).trim() === '' ? '' : fence
+}
+
 /** Locate release sections while leaving the original Markdown bytes intact. */
 export function parseChangelog(content: string): Changelog {
 	const newline = content.includes('\r\n') ? '\r\n' : '\n'
@@ -57,14 +75,9 @@ export function parseChangelog(content: string): Changelog {
 	let fence = ''
 	let footerStart = content.length
 	for (const line of content.split(LINE_BOUNDARY)) {
-		const marker = FENCE.exec(line)?.[1]
-		if (marker !== undefined) {
-			if (fence === '') {
-				fence = marker
-			} else if (marker.startsWith(fence)) {
-				fence = ''
-			}
-		} else if (fence === '') {
+		const isFenceLine = FENCE.test(line)
+		fence = nextFence(line, fence)
+		if (!isFenceLine && fence === '') {
 			const version = releaseHeadingVersion(line)
 			if (version !== undefined) {
 				if (sections.some((section) => section.version === version)) {
@@ -83,6 +96,12 @@ export function parseChangelog(content: string): Changelog {
 		}
 
 		offset += line.length
+	}
+
+	if (fence !== '') {
+		throw new Error(
+			`Unclosed code fence (${fence}) in the changelog; it hides any release headings after it. Close the fence before updating.`,
+		)
 	}
 
 	for (let index = 0; index < sections.length; index++) {
