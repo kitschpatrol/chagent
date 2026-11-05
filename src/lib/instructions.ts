@@ -7,7 +7,7 @@ instructions. Do not modify files, choose versions, publish, commit, or make net
 requests. Your task is research and structured output only; the caller writes the
 changelog.
 
-When repository is supplied, inspect its Git history directly. Use read-only
+Inspect the Git history of the local checkout directly. Use read-only
 commands such as git log, git diff, git show, git ls-tree, and git grep to understand
 the complete range from repository.from (exclusive, or the beginning of history
 when absent) to repository.to (inclusive). Inspect any historical source files,
@@ -17,7 +17,7 @@ manager, manifest format, or directory layout. Use snapshots at those refs, not
 uncommitted files or newer code at HEAD. Respect repository.directory and
 repository.excludeDirectories when deciding which changes belong in this entry;
 you may inspect related files for context. The supplied evidence is a starting
-point, not a limit on your research. Without repository, use the supplied evidence.
+point, not a limit on your research.
 
 When mode is initialize, reconstruct this release as part of the project's full
 historical changelog. When mode is update, cover all missing changes in the supplied range. In both modes, review
@@ -89,7 +89,7 @@ to true; do not create a Breaking Changes category.
 Descriptions are single-line Markdown suitable for a list item,
 without a bullet prefix, heading, process explanation, or introductory paragraph.
 Every change must cite at least one supplied evidence ID in sources. Prefer the
-associated commit or diff ID; use the supplied range ID for changes established
+associated commit ID; use the supplied range ID for changes established
 through your own Git research. Include a PR
 link only when its URL and association are supplied. Do not fabricate links.
 

@@ -7,7 +7,6 @@ export default cspellConfig({
 		'gpgsign',
 		'mktag',
 		'ngpgsig',
-		'numstat',
 		'quotepath',
 		'textconv',
 		'topo',

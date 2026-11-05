@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Evidence, GenerationRequest } from '../src/lib/types'
-import { historyBatches, researchEvidence, splitEvidence } from '../src/lib/batches'
+import { historyBatches, researchEvidence } from '../src/lib/batches'
 
 describe('evidence batching', () => {
 	it('uses spare context budget for a large PR associated with one release', () => {
@@ -9,6 +9,7 @@ describe('evidence batching', () => {
 			evidence: [{ id: `range:${index}`, kind: 'range', text: 'Inspect this release.' }],
 			existingEntries: '',
 			packageName: 'example',
+			repository: { directory: '.', excludeDirectories: [], root: '/example', to: 'head' },
 			timeoutMs: 5000,
 			version: `1.0.${index}`,
 		}))
@@ -55,27 +56,6 @@ describe('evidence batching', () => {
 			}
 		},
 	)
-	it.each(['source change\n', '\u{1}'])(
-		'retains every changed character within the batch budget for %j',
-		(fragment) => {
-			const text = fragment.repeat(4000)
-			const evidence: Evidence[] = [{ id: 'diff:source', kind: 'diff', text }]
-			const batches = splitEvidence(evidence, 4000)
-			expect(batches.length).toBeGreaterThan(1)
-			for (const batch of batches) {
-				expect(JSON.stringify(batch).length).toBeLessThanOrEqual(4000)
-			}
-
-			expect(
-				batches
-					.flat()
-					.filter((item) => item.kind === 'diff')
-					.map((item) => item.text)
-					.join(''),
-			).toBe(text)
-		},
-	)
-
 	it('keeps the complete Git range available when starting evidence exceeds the budget', () => {
 		const range: Evidence = {
 			id: 'range:before..after',

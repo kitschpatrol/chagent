@@ -82,7 +82,7 @@ function prompt(request: GenerationRequest): string {
 }
 
 type Invocation = Pick<GenerationRequest, 'effort' | 'model' | 'signal' | 'timeoutMs'> & {
-	cwd?: string
+	cwd: string
 }
 
 async function invokeAgent(
@@ -93,8 +93,7 @@ async function invokeAgent(
 ): Promise<unknown> {
 	const directory = await mkdtemp(path.join(os.tmpdir(), 'chagent-agent-'))
 	try {
-		const research = request.cwd !== undefined
-		const cwd = request.cwd ?? directory
+		const { cwd } = request
 		const schema = JSON.stringify(z.toJSONSchema(responseFormat, { target: 'draft-07' }))
 		let value: unknown
 		if (name === 'codex') {
@@ -119,7 +118,7 @@ async function invokeAgent(
 					'--config',
 					`model_reasoning_effort=${JSON.stringify(request.effort ?? defaults.effort)}`,
 					'--config',
-					`features.shell_tool=${String(research)}`,
+					'features.shell_tool=true',
 					'--config',
 					'approval_policy="never"',
 					'--config',
@@ -150,7 +149,7 @@ async function invokeAgent(
 					'--json-schema',
 					schema,
 					'--tools',
-					research ? 'Read,Glob,Grep,Bash' : '',
+					'Read,Glob,Grep,Bash',
 					'--safe-mode',
 					'--disable-slash-commands',
 					'--no-session-persistence',
@@ -201,7 +200,7 @@ export function createAgent(name: AgentName): AgentAdapter {
 		async generate(request) {
 			const result = await invokeAgent(
 				name,
-				{ ...request, cwd: request.repository?.root },
+				{ ...request, cwd: request.repository.root },
 				prompt(request),
 				responseSchema,
 			)
@@ -218,6 +217,5 @@ export function createAgent(name: AgentName): AgentAdapter {
 			return validateHistory(result, request)
 		},
 		name,
-		repositoryAccess: true,
 	}
 }

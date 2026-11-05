@@ -171,7 +171,6 @@ describe('batched GitHub enrichment', () => {
 			generate: vi.fn(),
 			generateHistory,
 			name: 'fixture',
-			repositoryAccess: true,
 		}
 		const jobs: GenerationJob[] = ['first', 'second', 'first'].map((id, index) => ({
 			changes: [],
@@ -179,6 +178,7 @@ describe('batched GitHub enrichment', () => {
 				evidence: [commit(id)],
 				existingEntries: '',
 				packageName: `package-${index}`,
+				repository: { directory: '.', excludeDirectories: [], root: '/example', to: 'head' },
 				timeoutMs: 5000,
 				version: '1.0.0',
 			},

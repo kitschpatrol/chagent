@@ -63,49 +63,12 @@ async function hasSourceChanges(root: string, files: string[], commit: string): 
 	return files.length > 0 && files.every((file) => LOCKFILE_PATH.test(file))
 }
 
-async function collectPatches(
-	root: string,
-	changed: string[],
-	from: string,
-	to: string,
-	hasCommits: boolean,
-): Promise<Evidence[]> {
-	const evidence: Evidence[] = []
-	for (const file of changed) {
-		const lockfile = LOCKFILE_PATH.test(file)
-		if (lockfile && !hasCommits) {
-			continue
-		}
-
-		const diff = await git(root, [
-			'diff',
-			'--no-ext-diff',
-			'--no-textconv',
-			lockfile ? '--numstat' : '--unified=3',
-			from,
-			to,
-			'--',
-			`:(literal)${file}`,
-		])
-		evidence.push({
-			id: `diff:${file}`,
-			kind: 'diff',
-			text: lockfile
-				? `Dependency lockfile changed: ${file}\nInsertions, deletions, path: ${diff}\nThese counts can include release bookkeeping. Dependency updates and compatibility claims require manifest diffs or associated commits; the generated lockfile body is omitted.`
-				: diff,
-		})
-	}
-
-	return evidence
-}
-
 /** Collect source changes, excluding generated notes and release-only commits. */
 export async function collectEvidence(
 	repository: Repository,
 	pkg: PackageInfo,
 	release: Release,
 	excludeDirectories: string[] = [],
-	includePatches = true,
 ): Promise<Evidence[]> {
 	const { root } = repository
 	const directories = await scopes(repository, pkg, release.ref)
@@ -179,10 +142,6 @@ export async function collectEvidence(
 		evidence.push({ id: commit, kind: 'commit', text: `${message}\nFiles: ${files.join(', ')}` })
 	}
 
-	if (includePatches) {
-		evidence.push(...(await collectPatches(root, changed, from, release.ref, evidence.length > 0)))
-	}
-
 	if (release.pending === true) {
 		const file = path.posix.join(pkg.directory, 'package.json')
 		const diff = await git(root, [
@@ -198,7 +157,7 @@ export async function collectEvidence(
 		}
 	}
 
-	if (!includePatches && evidence.length > 0) {
+	if (evidence.length > 0) {
 		evidence.unshift({
 			id: `range:${from}..${release.ref}`,
 			kind: 'range',

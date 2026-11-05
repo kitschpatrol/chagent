@@ -11,9 +11,10 @@ afterEach(() => {
 })
 
 const request: GenerationRequest = {
-	evidence: [{ id: 'abc', kind: 'diff', text: 'Add a new export.' }],
+	evidence: [{ id: 'abc', kind: 'commit', text: 'Add a new export.' }],
 	existingEntries: '',
 	packageName: 'example',
+	repository: { directory: '.', excludeDirectories: [], root: '', to: 'HEAD' },
 	timeoutMs: 5000,
 	version: '1.0.0',
 }
@@ -97,6 +98,7 @@ if (${JSON.stringify(name)} === 'codex') {
 						existingEntries: '',
 						id: 'first',
 						packageName: 'example',
+						repository: { directory: '.', excludeDirectories: [], root, to: 'HEAD' },
 						version: '1.0.0',
 					},
 					{
@@ -104,6 +106,7 @@ if (${JSON.stringify(name)} === 'codex') {
 						existingEntries: '',
 						id: 'second',
 						packageName: 'example',
+						repository: { directory: '.', excludeDirectories: [], root, to: 'HEAD' },
 						version: '1.0.1',
 					},
 				],

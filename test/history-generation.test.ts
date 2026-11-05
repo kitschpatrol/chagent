@@ -38,7 +38,6 @@ function fixtureAgent(): AgentAdapter & {
 				.map((release) => ({ changes: [change(release)], id: release.id }))
 		}),
 		name: 'fixture',
-		repositoryAccess: true,
 	}
 }
 
@@ -114,12 +113,12 @@ describe('shared history generation', () => {
 			expect(agent.generate).not.toHaveBeenCalled()
 			expect(agent.generateHistory).toHaveBeenCalledOnce()
 			const request = agent.generateHistory.mock.calls[0]![0]
-			expect(new Set(request.releases.map((release) => release.repository?.directory))).toEqual(
+			expect(new Set(request.releases.map((release) => release.repository.directory))).toEqual(
 				new Set(['.', 'projects/client', 'projects/engine']),
 			)
 			expect(
 				request.releases.find(
-					(release) => release.repository?.directory === '.' && release.version === 'Unreleased',
+					(release) => release.repository.directory === '.' && release.version === 'Unreleased',
 				)?.scope,
 			).toBe('repository')
 			expect(plan.files).toHaveLength(3)

@@ -47,7 +47,7 @@ describe('generation and writing', () => {
 			}
 			const root = await createRepository(implementations[language], false)
 			await git(root, ['tag', 'v1.0.0'])
-			const agent = { ...fixtureAgent(), repositoryAccess: true }
+			const agent = fixtureAgent()
 			const plan = await generateChangelog({ agent, cwd: root, github: false })
 			expect(
 				parseChangelog(plan.files[0]!.after).sections.map((section) => section.version),
@@ -56,7 +56,6 @@ describe('generation and writing', () => {
 			expect(initial.repository).toMatchObject({ directory: '.', root, to: plan.head })
 			expect(initial.initialRelease).toBe(true)
 			expect(initial.evidence[0]?.kind).toBe('range')
-			expect(initial.evidence.some((item) => item.kind === 'diff')).toBe(false)
 			await writeChangelog(plan)
 			await writeFiles(root, { 'readme.md': 'New installation guidance.\n' })
 			await commit(root, 'Document installation.')
@@ -292,9 +291,10 @@ describe('generation and writing', () => {
 		const request = agent.generate.mock.calls[0]![0]
 		expect(request.version).toBe('Unreleased')
 		expect(request.existingEntries).toContain('Improve example in Unreleased.')
+		expect(request.repository.from).toBe(await git(root, ['rev-parse', 'v1.0.0']))
 		expect(
 			request.evidence.some(
-				(item) => item.kind === 'diff' && item.text.includes('+export const answer = 45'),
+				(item) => item.kind === 'commit' && item.text.includes('Fix behavior.'),
 			),
 		).toBe(true)
 	})

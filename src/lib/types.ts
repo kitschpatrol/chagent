@@ -28,7 +28,7 @@ export type Evidence = {
 	/** Git commits associated with pull-request evidence. */
 	commits?: string[]
 	id: string
-	kind: 'commit' | 'diff' | 'manifest' | 'pull-request' | 'range'
+	kind: 'commit' | 'manifest' | 'pull-request' | 'range'
 	text: string
 }
 
@@ -61,10 +61,10 @@ export type GenerationRequest = {
 	model?: string
 	packageName: string
 	/**
-	 * Read-only research context; Git snapshots, not the working tree, define the
-	 * release.
+	 * Read-only research context in the local checkout; Git snapshots, not the
+	 * working tree, define the release.
 	 */
-	repository?: {
+	repository: {
 		directory: string
 		excludeDirectories: string[]
 		from?: string
@@ -87,11 +87,6 @@ export type AgentAdapter = {
 	 */
 	generateHistory?: (request: HistoryRequest) => Promise<HistoryChangeSet[]>
 	name: string
-	/**
-	 * The adapter can inspect Git history directly instead of requiring supplied
-	 * patches.
-	 */
-	repositoryAccess?: boolean
 }
 
 export type ReleaseContext = {

@@ -11,9 +11,8 @@ import type {
 	ResolvedOptions,
 } from './types'
 import { validateChanges, validateHistory } from './agents'
-import { historyBatches, researchEvidence, splitEvidence } from './batches'
+import { historyBatches, researchEvidence } from './batches'
 import { readCache, writeCache } from './cache'
-import { mergeChanges } from './changelog'
 import { collectEvidence, enrichWithGithub } from './evidence'
 import { instructionVersion } from './instructions'
 import { log } from './log'
@@ -44,7 +43,7 @@ export async function prepareGeneration(
 	from?: string,
 	onlyRepositoryFiles = false,
 ): Promise<GenerationJob> {
-	const { agent, options, repository } = context
+	const { options, repository } = context
 	options.signal?.throwIfAborted()
 	const excludeDirectories = onlyRepositoryFiles
 		? repository.packages.map((item) => item.directory)
@@ -54,7 +53,6 @@ export async function prepareGeneration(
 		pkg,
 		from === undefined ? release : { ...release, previousRef: from },
 		excludeDirectories,
-		agent.repositoryAccess !== true,
 	)
 	return {
 		changes: [],
@@ -155,33 +153,15 @@ async function enrichJobs(context: GenerationContext, jobs: GenerationJob[]): Pr
 
 async function generateOne(context: GenerationContext, job: GenerationJob): Promise<void> {
 	const { agent, options } = context
-	const limit = options.maxInputChars
-	const batches =
-		agent.repositoryAccess === true
-			? [researchEvidence(job.request.evidence, limit)]
-			: splitEvidence(job.request.evidence, limit)
-	log.info(
-		`Summarizing ${job.request.packageName} ${job.request.version} (${batches.length} batch${batches.length === 1 ? '' : 'es'}).`,
-	)
-	for (const evidence of batches) {
-		options.signal?.throwIfAborted()
-		const request = {
-			...job.request,
-			evidence,
-			existingEntries: mergeChanges(job.request.existingEntries, job.changes),
-		}
-		let changes =
-			agent.repositoryAccess === true ? undefined : await cachedChanges(context, request)
-		changes ??= validateChanges({ changes: await agent.generate(request) }, request)
-		job.changes.push(...changes)
-		if (agent.repositoryAccess !== true) {
-			await saveChanges(context, request, changes)
-		}
+	log.info(`Researching ${job.request.packageName} ${job.request.version}.`)
+	options.signal?.throwIfAborted()
+	const request = {
+		...job.request,
+		evidence: researchEvidence(job.request.evidence, options.maxInputChars),
 	}
-
-	if (agent.repositoryAccess === true) {
-		await saveChanges(context, job.request, job.changes)
-	}
+	const changes = validateChanges({ changes: await agent.generate(request) }, request)
+	job.changes.push(...changes)
+	await saveChanges(context, job.request, job.changes)
 }
 
 /**
@@ -200,10 +180,7 @@ export async function generateJobs(
 	await enrichJobs(context, active)
 	const pending: GenerationJob[] = []
 	for (const job of active) {
-		const cached =
-			context.agent.repositoryAccess === true
-				? await cachedChanges(context, job.request)
-				: undefined
+		const cached = await cachedChanges(context, job.request)
 		if (cached === undefined) {
 			pending.push(job)
 		} else {
@@ -211,11 +188,7 @@ export async function generateJobs(
 		}
 	}
 
-	if (
-		context.agent.repositoryAccess !== true ||
-		context.agent.generateHistory === undefined ||
-		pending.length < 2
-	) {
+	if (context.agent.generateHistory === undefined || pending.length < 2) {
 		for (const job of pending) {
 			await generateOne(context, job)
 		}

@@ -20,8 +20,10 @@ describe('release history', () => {
 		expect(releases[1]?.previousRef).toBe(releases[0]?.ref)
 		const first = await collectEvidence(repository, repository.rootPackage, releases[0]!)
 		const second = await collectEvidence(repository, repository.rootPackage, releases[1]!)
-		expect(first.some((item) => item.text.includes('answer = 42'))).toBe(true)
-		expect(second.some((item) => item.text.includes('+export const answer = 43'))).toBe(true)
+		expect(first[0]?.kind).toBe('range')
+		expect(first.some((item) => item.text.includes('Add initial implementation.'))).toBe(true)
+		expect(second.some((item) => item.text.includes('Change the answer.'))).toBe(true)
+		expect(second.some((item) => item.text.includes('Add initial implementation.'))).toBe(false)
 		expect(await hasNodeException(repository, repository.rootPackage, releases)).toBe(true)
 	})
 
@@ -91,11 +93,11 @@ describe('release history', () => {
 		const [changelogRelease] = await resolveReleases(repository, changelog!, {})
 		const buildEvidence = await collectEvidence(repository, build!, buildRelease!)
 		const changelogEvidence = await collectEvidence(repository, changelog!, changelogRelease!)
-		const buildIds = buildEvidence.map((item) => item.id)
-		expect(buildIds).toContain('diff:packages/build/src/dist/source.js')
-		expect(buildIds).not.toContain('diff:packages/build/dist/out.js')
-		expect(changelogEvidence.map((item) => item.id)).toContain(
-			'diff:packages/changelog/src/index.js',
+		const buildText = buildEvidence.map((item) => item.text).join('\n')
+		expect(buildText).toContain('packages/build/src/dist/source.js')
+		expect(buildText).not.toContain('packages/build/dist/out.js')
+		expect(changelogEvidence.map((item) => item.text).join('\n')).toContain(
+			'packages/changelog/src/index.js',
 		)
 	})
 
@@ -151,23 +153,11 @@ describe('release history', () => {
 		const repository = await inspectRepository(root)
 		const releases = await resolveReleases(repository, repository.rootPackage, {})
 		const evidence = await collectEvidence(repository, repository.rootPackage, releases.at(-1)!)
-		expect(evidence.filter((item) => item.kind === 'diff').map((item) => item.id)).toEqual(
-			expect.arrayContaining(['diff:internal.js', 'diff:package.json', 'diff:readme.md']),
-		)
-		expect(evidence.find((item) => item.kind === 'commit')?.text).toContain(
-			'fix Node compatibility',
-		)
-		expect(evidence.some((item) => item.id === 'diff:index.js')).toBe(false)
-		const research = await collectEvidence(
-			repository,
-			repository.rootPackage,
-			releases.at(-1)!,
-			[],
-			false,
-		)
-		expect(research.some((item) => item.kind === 'diff')).toBe(false)
-		expect(research[0]?.kind).toBe('range')
-		expect(research[0]?.text).toContain('git show')
+		const source = evidence.find((item) => item.kind === 'commit')?.text
+		expect(source).toContain('fix Node compatibility')
+		expect(source).toContain('Files: internal.js, package.json, readme.md')
+		expect(evidence[0]?.kind).toBe('range')
+		expect(evidence[0]?.text).toContain('git show')
 	})
 
 	it('uses root release tags even when package.json belongs to unrelated tooling', async () => {
@@ -192,9 +182,6 @@ describe('release history', () => {
 		const evidence = await collectEvidence(repository, repository.rootPackage, releases.at(-1)!)
 		expect(evidence.find((item) => item.kind === 'commit')?.text).toContain(
 			'Refresh resolved dependencies.',
-		)
-		expect(evidence.find((item) => item.id === 'diff:pnpm-lock.yaml')?.text).toContain(
-			'Dependency lockfile changed',
 		)
 		expect(evidence.some((item) => item.text.includes('generated-lockfile-sentinel'))).toBe(false)
 	})
@@ -264,6 +251,6 @@ describe('release history', () => {
 		const pkg = repository.packages[0]!
 		const releases = await resolveReleases(repository, pkg, {})
 		const evidence = await collectEvidence(repository, pkg, releases[0]!)
-		expect(evidence.some((item) => item.id === 'diff:packages/b/index.js')).toBe(true)
+		expect(evidence.some((item) => item.text.includes('packages/b/index.js'))).toBe(true)
 	})
 })
