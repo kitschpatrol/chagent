@@ -39,6 +39,7 @@ const fs = require('node:fs');
 const args = process.argv.slice(2);
 fs.writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(args));
 const input = JSON.parse(fs.readFileSync(0, 'utf8').split('Input data (JSON):\n')[1]);
+if (process.cwd() !== input.repository.root) process.exit(9);
 const result = { changes: [{ category: 'Added', description: 'Support an additional export.', breaking: false, sources: [input.evidence[0].id] }] };
 if (${JSON.stringify(name)} === 'codex') {
   fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], JSON.stringify(result));
@@ -56,14 +57,33 @@ if (${JSON.stringify(name)} === 'codex') {
 			}
 
 			vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH ?? ''}`)
-			const changes = await createAgent(name).generate(request)
+			const changes = await createAgent(name).generate({
+				...request,
+				repository: { directory: '.', excludeDirectories: [], root, to: 'HEAD' },
+			})
 			expect(changes[0]?.description).toBe('Support an additional export.')
 			const args: unknown = JSON.parse(await readFile(argsFile, 'utf8'))
 			expect(args).not.toContain('--bare')
 			const expected =
 				name === 'codex'
-					? ['read-only', 'gpt-6.1-sol', 'model_reasoning_effort="xhigh"']
-					: ['--tools', '', '--model', 'claude-opus-5-5', '--effort', 'xhigh']
+					? [
+							'read-only',
+							'gpt-6.1-sol',
+							'model_reasoning_effort="xhigh"',
+							'features.shell_tool=true',
+							'approval_policy="never"',
+						]
+					: [
+							'--tools',
+							'Read,Glob,Grep,Bash',
+							'--safe-mode',
+							'--permission-mode',
+							'dontAsk',
+							'--model',
+							'claude-opus-5-5',
+							'--effort',
+							'xhigh',
+						]
 			expect(args).toEqual(expect.arrayContaining(expected))
 		},
 	)

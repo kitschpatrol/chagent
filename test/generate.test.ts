@@ -2,6 +2,7 @@ import { readFile, rm, symlink } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentAdapter, GenerationRequest } from '../src/lib/types'
+import { writeCache } from '../src/lib/cache'
 import { changelogHeader, parseChangelog } from '../src/lib/changelog'
 import { generateChangelog } from '../src/lib/generate'
 import { git } from '../src/lib/process'
@@ -37,6 +38,74 @@ function fixtureAgent(): AgentAdapter & {
 }
 
 describe('generation and writing', () => {
+	it.each(['python', 'rust', 'plain Git'])(
+		'initializes and updates a %s project without npm metadata',
+		async (language) => {
+			const implementations: Record<string, Record<string, string>> = {
+				'plain Git': { 'manual.txt': 'The original instructions.\n' },
+				python: {
+					'example.py': 'def answer():\n    return 42\n',
+					'pyproject.toml': '[project]\nname = "example"\nversion = "1.0.0"\n',
+				},
+				rust: {
+					'Cargo.toml': '[package]\nname = "example"\nversion = "1.0.0"\n',
+					'src/lib.rs': 'pub fn answer() -> u32 { 42 }\n',
+				},
+			}
+			const root = await createRepository(implementations[language], false)
+			directories.push(root)
+			await git(root, ['tag', 'v1.0.0'])
+			const agent = { ...fixtureAgent(), repositoryAccess: true }
+			const plan = await generateChangelog({ agent, cwd: root, github: false })
+			expect(
+				parseChangelog(plan.files[0]!.after).sections.map((section) => section.version),
+			).toEqual(['1.0.0'])
+			const initial = agent.generate.mock.calls[0]![0]
+			expect(initial.repository).toMatchObject({ directory: '.', root, to: plan.head })
+			expect(initial.initialRelease).toBe(true)
+			expect(initial.evidence[0]?.kind).toBe('range')
+			expect(initial.evidence.some((item) => item.kind === 'diff')).toBe(false)
+			await writeChangelog(plan)
+			await writeFiles(root, { 'readme.md': 'New installation guidance.\n' })
+			await commit(root, 'Document installation.')
+			await git(root, ['tag', 'v1.0.1'])
+			const update = await generateChangelog({ agent, cwd: root, github: false })
+			expect(
+				parseChangelog(update.files[0]!.after).sections.map((section) => section.version),
+			).toEqual(['1.0.1', '1.0.0'])
+			expect(update.files[0]?.after).toContain(
+				plan.files[0]!.after.slice(plan.files[0]!.after.indexOf('## ')),
+			)
+			await expect(readFile(path.join(root, 'package.json'))).rejects.toThrow()
+		},
+	)
+
+	it('supports explicitly configured non-npm workspace directories and their tags', async () => {
+		const root = await createRepository(
+			{
+				'projects/client/client.py': 'def answer():\n    return 42\n',
+				'projects/engine/src/lib.rs': 'pub fn answer() -> u32 { 42 }\n',
+			},
+			false,
+		)
+		directories.push(root)
+		await git(root, ['tag', 'engine@1.0.0'])
+		await git(root, ['tag', 'client@2.0.0'])
+		const plan = await generateChangelog({
+			agent: fixtureAgent(),
+			cwd: root,
+			github: false,
+			packages: ['projects/*'],
+		})
+		expect(plan.files).toHaveLength(3)
+		expect(
+			plan.files.find((file) => file.path === path.join(root, 'changelog.md'))?.after,
+		).toContain('## engine@1.0.0')
+		expect(
+			plan.files.find((file) => file.path === path.join(root, 'projects/client/changelog.md'))
+				?.after,
+		).toContain('## 2.0.0 - ')
+	})
 	it('creates history, previews without writing, and makes a repeated run a no-op', async () => {
 		const root = await createRepository()
 		directories.push(root)
@@ -44,6 +113,11 @@ describe('generation and writing', () => {
 		const agent = fixtureAgent()
 		const plan = await generateChangelog({ agent, cwd: root, github: false })
 		expect(plan.files).toHaveLength(1)
+		expect(agent.generate.mock.calls[0]?.[0]).toMatchObject({
+			initialRelease: true,
+			mode: 'initialize',
+			scope: 'package',
+		})
 		expect(await previewChangelog(plan)).toContain('Improve example in 1.0.0.')
 		await expect(readFile(path.join(root, 'changelog.md'))).rejects.toThrow()
 		await writeChangelog(plan)
@@ -82,6 +156,10 @@ describe('generation and writing', () => {
 		await writeFiles(root, { 'index.js': 'export const answer = 44\n' })
 		await commit(root, 'Improve behavior.')
 		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		expect(agent.generate.mock.calls.at(-1)?.[0]).toMatchObject({
+			initialRelease: false,
+			mode: 'update',
+		})
 		plan.files[0]!.after = plan.files[0]!.after.replace(
 			'Improve example in Unreleased.',
 			'A better human description.',
@@ -94,6 +172,41 @@ describe('generation and writing', () => {
 		)
 	})
 
+	it.each(['single', 'shared', 'independent'] as const)(
+		'rebuilds %s history only when explicitly requested and keeps it reviewable',
+		async (layout) => {
+			const history =
+				changelogHeader + '\n## [1.0.0] - 2026-01-01\n\n### Added\n\n- Handcrafted history.\n'
+			const files: Record<string, string> = { 'changelog.md': history }
+			if (layout !== 'single') {
+				files['pnpm-workspace.yaml'] = 'packages:\n  - packages/*\n'
+				files['packages/a/package.json'] = '{"name":"@example/a","version":"1.0.0"}'
+				files['packages/a/changelog.md'] = history
+				if (layout === 'independent') {
+					files['changelog.md'] = history.replace('[1.0.0]', '@example/a@1.0.0')
+				}
+			}
+
+			const root = await createRepository(files)
+			directories.push(root)
+			await git(root, ['tag', layout === 'independent' ? '@example/a@1.0.0' : 'v1.0.0'])
+			const agent = fixtureAgent()
+			const original = await generateChangelog({ agent, cwd: root, github: false })
+			expect(original.files).toEqual([])
+			const rebuilt = await generateChangelog({ agent, cwd: root, github: false, rebuild: true })
+			expect(rebuilt.files).toHaveLength(layout === 'single' ? 1 : 2)
+			for (const file of rebuilt.files) {
+				expect(file.before).toContain('Handcrafted history.')
+				expect(file.after).not.toContain('Handcrafted history.')
+				expect(file.after).toContain('Improve ')
+				expect(await readFile(file.path, 'utf8')).toBe(file.before)
+				expect(parseChangelog(file.after).sections).toHaveLength(1)
+			}
+
+			expect(await previewChangelog(rebuilt)).toContain('- Handcrafted history.')
+		},
+	)
+
 	it('rejects concurrent changes before writing any file', async () => {
 		const root = await createRepository()
 		directories.push(root)
@@ -103,6 +216,35 @@ describe('generation and writing', () => {
 		expect(await readFile(path.join(root, 'changelog.md'), 'utf8')).toBe(
 			'Human work in progress.\n',
 		)
+	})
+
+	it('rechecks Unreleased evidence after generation instructions change', async () => {
+		const root = await createRepository()
+		directories.push(root)
+		await git(root, ['tag', 'v1.0.0'])
+		const agent = fixtureAgent()
+		await writeChangelog(await generateChangelog({ agent, cwd: root, github: false }))
+		await writeFiles(root, { 'index.js': 'export const answer = 45\n' })
+		await commit(root, 'Fix behavior.')
+		const draft = await generateChangelog({ agent, cwd: root, github: false })
+		await writeChangelog(draft)
+		const checkpoint = draft.checkpoints[0]!
+		await writeCache(path.join(root, '.git', 'chagent', 'checkpoints'), checkpoint.path, {
+			...checkpoint,
+			instructionVersion: 'old',
+		})
+		agent.generate.mockClear()
+		agent.cacheKey = undefined
+		await generateChangelog({ agent, cwd: root, github: false })
+		expect(agent.generate).toHaveBeenCalledOnce()
+		const request = agent.generate.mock.calls[0]![0]
+		expect(request.version).toBe('Unreleased')
+		expect(request.existingEntries).toContain('Improve example in Unreleased.')
+		expect(
+			request.evidence.some(
+				(item) => item.kind === 'diff' && item.text.includes('+export const answer = 45'),
+			),
+		).toBe(true)
 	})
 
 	it('rejects a symlink substituted for a changelog', async () => {

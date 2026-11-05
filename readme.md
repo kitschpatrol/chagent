@@ -18,7 +18,11 @@
 
 Run `chagent` in a Git repository to either create a changelog where none previously existed, or update an existing changelog to capture recent changes.
 
+Projects can use any language or build system. Version tags supply release boundaries; `package.json` is optional. Codex or Claude inspects historical commits and files directly to decide what belongs in each release.
+
 Between releases, it will add changes under the `Unreleased` heading. Historical release sections retain their original Markdown.
+
+Initialization reconstructs the complete reachable release history, including the initial release's capabilities and meaningful documentation, dependency, compatibility, build, test, and CI changes. Maintenance releases receive useful descriptions within the canonical changelog categories.
 
 The CLI and TypeScript library use your installed, authenticated Codex or Claude Code CLI. Codex defaults to `gpt-6.1-sol`; Claude defaults to [Opus 5.5](https://platform.claude.com/docs/en/models/opus-5-5/overview) (`claude-opus-5-5`). Both use `xhigh` reasoning effort by default. No separate API key or installed agent skill is required.
 
@@ -82,6 +86,8 @@ Interactive review edits temporary candidate files. After the editor exits, the 
 
 The default command writes changelog files without staging or committing them.
 
+Use `chagent --rebuild --interactive` to reconstruct an existing changelog from history and review the replacement. This explicitly replaces historical prose, including manual edits; ordinary runs preserve it. Use `--rebuild --dry-run` to preview the reconstruction without writing files. In a monorepo, rebuilding covers both package changelogs and the root summary.
+
 <!-- cli-help -->
 
 #### Commands
@@ -105,6 +111,7 @@ chagent
 | `--interactive`<br>`-i` | Review a diff and optionally edit before writing                          | `boolean`                                     | `false` |
 | `--editor`              | Editor command for interactive review; configure GUI editors to wait      | `string`                                      |         |
 | `--dry-run`             | Print a diff without applying changes                                     | `boolean`                                     | `false` |
+| `--rebuild`             | Reconstruct all history, replacing existing release text                  | `boolean`                                     | `false` |
 | `--amend`               | Amend a verified unpublished release commit and matching local tags       | `boolean`                                     | `false` |
 | `--github`              | Enrich Git evidence using gh when available; disable with --no-github     | `boolean`                                     |         |
 | `--cache`               | Cache drafts and incremental state; disable with --no-cache               | `boolean`                                     |         |
@@ -124,6 +131,9 @@ chagent
 # Review the diff, optionally edit, then accept or cancel.
 chagent --interactive
 
+# Reconstruct an existing changelog and review its replacement.
+chagent --rebuild --interactive
+
 # Select Claude Opus 5.5 with xhigh effort.
 chagent --agent claude
 
@@ -139,7 +149,7 @@ chagent --dry-run --no-github
 
 `previewChangelog(plan)` returns a unified diff. `reviewChangelog(plan, { editor })` provides terminal review and returns an edited plan, or `undefined` when cancelled. `amendRelease(plan)` is the explicit legacy release integration described below. `setLogger(logger)` enables library logging; library calls are silent by default.
 
-Custom providers implement the exported `AgentAdapter` type and can be passed as `agent`. Their `generate(request)` method returns `Change[]`, with canonical categories and source IDs from `request.evidence`. Give an adapter a stable `cacheKey` to enable reusable draft caching, and change that key when its behavior changes. All adapter results receive the same output validation.
+Custom providers implement the exported `AgentAdapter` type and can be passed as `agent`. Their `generate(request)` method returns `Change[]`, with canonical categories and source IDs from `request.evidence`. Requests distinguish initialization from updates, identify the initial release, and provide the repository path, scope, and Git refs. Set `repositoryAccess: true` when an adapter can research the repository directly; it receives a bounded starting context and a range citation for additional findings. Other adapters receive complete patches in batches. Give an adapter a stable `cacheKey` to enable reusable draft caching, and change that key when its behavior changes. All adapter results receive the same output validation.
 
 #### API Examples
 
@@ -203,7 +213,9 @@ For an existing post-bump workflow, `chagent --amend` explicitly amends an unpub
 
 Workspace declarations in `pnpm-workspace.yaml` or `package.json` determine the packages to process. Each current workspace package gets its own changelog. The root contains repository highlights and links to package releases.
 
-Shared-version repositories use repository versions at the root. Independently versioned repositories use package-qualified headings such as `@example/package@1.2.0`. Repository infrastructure changes appear in the root's `Unreleased` section. Explicit workspace dependencies contribute relevant source context to dependent packages. Generated build output and lockfile-only churn do not produce feature entries.
+For other monorepo layouts, configure `packages` directory globs. These directories do not need npm manifests; their Git tags identify releases, using the directory basename as the package name.
+
+Shared-version repositories use repository versions at the root. Independently versioned repositories use package-qualified headings such as `@example/package@1.2.0`. Repository infrastructure changes appear in the root's `Unreleased` section. Explicit workspace dependencies contribute relevant source context to dependent packages. Dependency and tooling maintenance belongs under `Changed`; generated build output is excluded.
 
 GitHub links to package changelogs on the default branch remain usable when a root entry is extracted for GitHub release notes.
 
@@ -233,11 +245,13 @@ Use `packages` and `exclude` directory globs to customize workspace discovery. U
 
 ### Implementation notes
 
-Chagent reads reachable Git tags, commit messages, and source diffs. Local version bumps are recognized before a tag exists. Without reliable released-version boundaries, new changes belong to `Unreleased`; version numbers are not invented. An existing release heading with no matching Git boundary requires its tags or a corrected tag pattern. Shallow clones must be completed before generation.
+Chagent reads reachable version tags and commit history regardless of the project's language. Optional npm metadata supplies workspace discovery, local version-bump detection before tagging, and the conditional Node.js compatibility note. Repository tags remain authoritative even when a root `package.json` has an unrelated tooling version. Other projects use tagged releases, or an explicit `release` context through the library API. Without reliable released-version boundaries, new changes belong to `Unreleased`; version numbers are not invented. An existing release heading with no matching Git boundary requires its tags or a corrected tag pattern. Shallow clones must be completed before generation.
 
 GitHub enrichment uses release dates and commit-associated PR information. **GitHub release-note bodies are never generation inputs.** Changelog files and generated build output are excluded from source evidence. Existing changelog prose is supplied only to preserve edits and avoid duplicate entries.
 
-Agents return structured changes with evidence references. Application code owns the header, release boundaries, Markdown insertion, and Git operations. Codex runs with a read-only sandbox and Claude runs without built-in tools; both work in a temporary directory containing the supplied context. Repository content is still sent to the selected agent service, using your existing account.
+The agent chooses which historical source files, public interfaces, documentation, and build configuration to inspect. It reads Git snapshots at the supplied release refs instead of treating current or uncommitted files as historical evidence. `maxInputChars` bounds the starting evidence supplied to research adapters; it does not restrict which repository files they can investigate. Lockfile maintenance retains its commit intent, while pure npm version-bump bookkeeping is excluded.
+
+Agents return structured changes with evidence references. Application code owns the header, release boundaries, Markdown insertion, and Git writes. Agents run in the repository: Codex uses a read-only sandbox with approval requests disabled; Claude exposes read/search and Bash tools in [`dontAsk` mode](https://code.claude.com/docs/en/permissions), which allows read-only commands and denies actions requiring permission. Customizations are disabled for these invocations. Only chagent writes the reviewed changelog. Repository content is sent to the selected agent service using your existing account.
 
 Drafts and checkpoints are stored under the checkout's Git directory in `chagent/`. They are disposable and are not committed. Completed batches can be reused after interruptions. `--no-cache` disables reuse and persistence. Dry runs can populate the draft cache but do not apply changelog edits.
 

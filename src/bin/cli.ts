@@ -61,6 +61,11 @@ try {
 						description: 'Print a diff without applying changes',
 						type: 'boolean',
 					})
+					.option('rebuild', {
+						default: false,
+						description: 'Reconstruct all history, replacing existing release text',
+						type: 'boolean',
+					})
 					.option('amend', {
 						default: false,
 						description: 'Amend a verified unpublished release commit and matching local tags',
@@ -98,6 +103,7 @@ try {
 					effort: args.effort as Effort | undefined,
 					github: args.github,
 					model: args.model,
+					rebuild: args.rebuild,
 					signal: controller.signal,
 					timeoutMs: args.timeout === undefined ? undefined : args.timeout * 1000,
 				})

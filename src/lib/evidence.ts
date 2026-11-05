@@ -7,7 +7,7 @@ const GENERATED_PATH = /(?:^|\/)(?:changelog(?:\.md)?|node_modules|dist|build|co
 const LOCKFILE_PATH = /(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?)$/v
 
 function ignored(file: string): boolean {
-	return GENERATED_PATH.test(file) || LOCKFILE_PATH.test(file)
+	return GENERATED_PATH.test(file)
 }
 
 async function scopes(repository: Repository, pkg: PackageInfo, ref: string): Promise<string[]> {
@@ -40,6 +40,10 @@ async function scopes(repository: Repository, pkg: PackageInfo, ref: string): Pr
 
 async function hasSourceChanges(root: string, files: string[], commit: string): Promise<boolean> {
 	for (const file of files) {
+		if (LOCKFILE_PATH.test(file)) {
+			continue
+		}
+
 		if (
 			path.posix.basename(file) !== 'package.json' ||
 			!(await isVersionOnlyChange(root, file, commit + '^', commit))
@@ -48,7 +52,43 @@ async function hasSourceChanges(root: string, files: string[], commit: string): 
 		}
 	}
 
-	return false
+	return files.length > 0 && files.every((file) => LOCKFILE_PATH.test(file))
+}
+
+async function collectPatches(
+	root: string,
+	changed: string[],
+	from: string,
+	to: string,
+	hasCommits: boolean,
+): Promise<Evidence[]> {
+	const evidence: Evidence[] = []
+	for (const file of changed) {
+		const lockfile = LOCKFILE_PATH.test(file)
+		if (lockfile && !hasCommits) {
+			continue
+		}
+
+		const diff = await git(root, [
+			'diff',
+			'--no-ext-diff',
+			'--no-textconv',
+			lockfile ? '--numstat' : '--unified=3',
+			from,
+			to,
+			'--',
+			`:(literal)${file}`,
+		])
+		evidence.push({
+			id: `diff:${file}`,
+			kind: 'diff',
+			text: lockfile
+				? `Dependency lockfile changed: ${file}\nInsertions, deletions, path: ${diff}\nThese counts can include release bookkeeping. Dependency updates and compatibility claims require manifest diffs or associated commits; the generated lockfile body is omitted.`
+				: diff,
+		})
+	}
+
+	return evidence
 }
 
 /** Collect source changes, excluding generated notes and release-only commits. */
@@ -57,6 +97,7 @@ export async function collectEvidence(
 	pkg: PackageInfo,
 	release: Release,
 	excludeDirectories: string[] = [],
+	includePatches = true,
 ): Promise<Evidence[]> {
 	const { root } = repository
 	const directories = await scopes(repository, pkg, release.ref)
@@ -80,7 +121,22 @@ export async function collectEvidence(
 		'--',
 		...paths,
 	])
-	const changed = awaitedResult1.split('\0').filter((file) => file !== '' && !ignored(file))
+	const changed: string[] = []
+	for (const file of awaitedResult1.split('\0')) {
+		if (file === '' || ignored(file)) {
+			continue
+		}
+
+		if (
+			path.posix.basename(file) === 'package.json' &&
+			(await isVersionOnlyChange(root, file, from, release.ref))
+		) {
+			continue
+		}
+
+		changed.push(file)
+	}
+
 	if (changed.length === 0) {
 		return []
 	}
@@ -113,18 +169,8 @@ export async function collectEvidence(
 		evidence.push({ id: commit, kind: 'commit', text: `${message}\nFiles: ${files.join(', ')}` })
 	}
 
-	for (const file of changed) {
-		const diff = await git(root, [
-			'diff',
-			'--no-ext-diff',
-			'--no-textconv',
-			'--unified=3',
-			from,
-			release.ref,
-			'--',
-			`:(literal)${file}`,
-		])
-		evidence.push({ id: `diff:${file}`, kind: 'diff', text: diff })
+	if (includePatches) {
+		evidence.push(...(await collectPatches(root, changed, from, release.ref, evidence.length > 0)))
 	}
 
 	if (release.pending === true) {
@@ -140,6 +186,14 @@ export async function collectEvidence(
 		if (diff !== '') {
 			evidence.push({ id: `manifest:${file}`, kind: 'manifest', text: diff })
 		}
+	}
+
+	if (!includePatches && evidence.length > 0) {
+		evidence.unshift({
+			id: `range:${from}..${release.ref}`,
+			kind: 'range',
+			text: `Research the complete Git range ${range} using git log, git diff, git show, and git ls-tree. The supplied commits are a starting point, not a complete description of changes. Follow the scope and exclusions in repository.`,
+		})
 	}
 
 	return evidence

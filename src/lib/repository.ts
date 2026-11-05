@@ -288,11 +288,17 @@ async function workspacePackages(
 		}
 
 		const text = await readOptional(path.join(root, directory, 'package.json'))
-		if (text === undefined) {
+		if (text === undefined && config.packages === undefined) {
 			continue
 		}
 
-		packages.push(packageInfo(manifestSchema.parse(JSON.parse(text)), directory))
+		packages.push(
+			packageInfo(
+				text === undefined ? undefined : manifestSchema.parse(JSON.parse(text)),
+				directory,
+				path.posix.basename(directory),
+			),
+		)
 	}
 
 	return packages
@@ -311,11 +317,18 @@ async function taggedReleases(
 		}
 
 		const manifest = await manifestAt(repository.root, pkg.directory, tag.commit)
-		if (
-			(manifest === undefined && pkg.directory !== '.') ||
-			(manifest?.version !== undefined && semver.valid(manifest.version) !== version)
-		) {
-			continue
+		if (pkg.directory !== '.') {
+			if (manifest?.version !== undefined && semver.valid(manifest.version) !== version) {
+				continue
+			}
+
+			if (
+				manifest === undefined &&
+				(await git(repository.root, ['cat-file', '-t', `${tag.commit}:${pkg.directory}`], true)) !==
+					'tree'
+			) {
+				continue
+			}
 		}
 
 		const existing = releases.find((release) => release.version === version)

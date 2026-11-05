@@ -87,6 +87,94 @@ describe('release history', () => {
 		expect(await collectEvidence(repository, repository.rootPackage, release)).toEqual([])
 	})
 
+	it('retains documentation and maintenance evidence for historical research', async () => {
+		const root = await createRepository({
+			'index.js': 'export { publicMethod } from "./internal.js"\n',
+			'internal.js': 'export const publicMethod = () => 1\nexport const helper = () => 2\n',
+			'package.json':
+				'{"name":"example","version":"1.0.0","exports":"./index.js","devDependencies":{"tool":"^1.0.0"}}',
+			'readme.md': 'Install with the old command.\n',
+		})
+		directories.push(root)
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, {
+			'internal.js': 'export const publicMethod = () => 1\nconst helper = () => 2\n',
+			'package.json':
+				'{"name":"example","version":"1.0.0","exports":"./index.js","devDependencies":{"tool":"^1.0.1"}}',
+			'readme.md': 'Install with the corrected command.\n',
+		})
+		await commit(
+			root,
+			'Update tooling to fix Node compatibility and correct installation guidance.',
+		)
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		const evidence = await collectEvidence(repository, repository.rootPackage, releases.at(-1)!)
+		expect(evidence.filter((item) => item.kind === 'diff').map((item) => item.id)).toEqual(
+			expect.arrayContaining(['diff:internal.js', 'diff:package.json', 'diff:readme.md']),
+		)
+		expect(evidence.find((item) => item.kind === 'commit')?.text).toContain(
+			'fix Node compatibility',
+		)
+		expect(evidence.some((item) => item.id === 'diff:index.js')).toBe(false)
+		const research = await collectEvidence(
+			repository,
+			repository.rootPackage,
+			releases.at(-1)!,
+			[],
+			false,
+		)
+		expect(research.some((item) => item.kind === 'diff')).toBe(false)
+		expect(research[0]?.kind).toBe('range')
+		expect(research[0]?.text).toContain('git show')
+	})
+
+	it('uses root release tags even when package.json belongs to unrelated tooling', async () => {
+		const root = await createRepository({
+			'package.json': '{"name":"docs-tooling","version":"0.0.0"}',
+		})
+		directories.push(root)
+		await git(root, ['tag', 'v2.0.0'])
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		expect(releases.map((release) => release.version)).toEqual(['2.0.0'])
+	})
+
+	it('includes lockfile-only maintenance without supplying the generated lockfile body', async () => {
+		const root = await createRepository({ 'pnpm-lock.yaml': 'lockfileVersion: 9\n' })
+		directories.push(root)
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, {
+			'pnpm-lock.yaml': 'lockfileVersion: 9\n# generated-lockfile-sentinel\n',
+		})
+		await commit(root, 'Refresh resolved dependencies.')
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		const evidence = await collectEvidence(repository, repository.rootPackage, releases.at(-1)!)
+		expect(evidence.find((item) => item.kind === 'commit')?.text).toContain(
+			'Refresh resolved dependencies.',
+		)
+		expect(evidence.find((item) => item.id === 'diff:pnpm-lock.yaml')?.text).toContain(
+			'Dependency lockfile changed',
+		)
+		expect(evidence.some((item) => item.text.includes('generated-lockfile-sentinel'))).toBe(false)
+	})
+
+	it('keeps manifest and lockfile release bookkeeping out of an otherwise empty range', async () => {
+		const root = await createRepository({ 'package-lock.json': '{"version":"1.0.0"}' })
+		directories.push(root)
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, {
+			'package-lock.json': '{"version":"1.0.1"}',
+			'package.json': '{"name":"example","version":"1.0.1","engines":{"node":">=18"}}',
+		})
+		await commit(root, 'Release: 1.0.1')
+		await git(root, ['tag', 'v1.0.1'])
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		expect(await collectEvidence(repository, repository.rootPackage, releases[1]!)).toEqual([])
+	})
+
 	it('discovers pnpm packages and their independent tags', async () => {
 		const root = await createRepository({
 			'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',

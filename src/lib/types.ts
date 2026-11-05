@@ -20,7 +20,7 @@ export type Change = {
 
 export type Evidence = {
 	id: string
-	kind: 'commit' | 'diff' | 'manifest' | 'pull-request'
+	kind: 'commit' | 'diff' | 'manifest' | 'pull-request' | 'range'
 	text: string
 }
 
@@ -28,8 +28,21 @@ export type GenerationRequest = {
 	effort?: Effort
 	evidence: Evidence[]
 	existingEntries: string
+	initialRelease?: boolean
+	mode?: 'initialize' | 'update'
 	model?: string
 	packageName: string
+	/**
+	 * Read-only research context; Git snapshots, not the working tree, define the
+	 * release.
+	 */
+	repository?: {
+		directory: string
+		excludeDirectories: string[]
+		from?: string
+		root: string
+		to: string
+	}
 	scope?: 'package' | 'repository'
 	signal?: AbortSignal
 	timeoutMs: number
@@ -41,6 +54,11 @@ export type AgentAdapter = {
 	cacheKey?: string
 	generate: (request: GenerationRequest) => Promise<Change[]>
 	name: string
+	/**
+	 * The adapter can inspect Git history directly instead of requiring supplied
+	 * patches.
+	 */
+	repositoryAccess?: boolean
 }
 
 export type Config = {
@@ -69,6 +87,11 @@ export type GenerateOptions = Omit<Config, 'agent'> & {
 	agent?: AgentAdapter | AgentName
 	configFile?: string
 	cwd?: string
+	/**
+	 * Explicitly reconstruct all history instead of preserving existing release
+	 * sections.
+	 */
+	rebuild?: boolean
 	release?: ReleaseContext
 	signal?: AbortSignal
 }
@@ -117,6 +140,7 @@ type Checkpoint = {
 	baseRef: string
 	contentHash: string
 	head: string
+	instructionVersion: string
 	path: string
 }
 

@@ -42,16 +42,18 @@ export function validateChanges(value: unknown, request: GenerationRequest): Cha
 }
 
 function prompt(request: GenerationRequest): string {
-	return `${instructions}\n\nInput data (JSON):\n${JSON.stringify({ evidence: request.evidence, existingEntries: request.existingEntries, packageName: request.packageName, scope: request.scope ?? 'package', version: request.version })}`
+	return `${instructions}\n\nInput data (JSON):\n${JSON.stringify({ evidence: request.evidence, existingEntries: request.existingEntries, initialRelease: request.initialRelease ?? false, mode: request.mode ?? 'update', packageName: request.packageName, repository: request.repository, scope: request.scope ?? 'package', version: request.version })}`
 }
 
 /** Create an adapter for an installed CLI using its existing authentication. */
 export function createAgent(name: AgentName): AgentAdapter {
 	return {
-		cacheKey: name === 'claude' ? 'claude-2' : 'codex-1',
+		cacheKey: name === 'claude' ? 'claude-3' : 'codex-2',
 		async generate(request) {
 			const directory = await mkdtemp(path.join(os.tmpdir(), 'chagent-agent-'))
 			try {
+				const research = request.repository !== undefined
+				const cwd = request.repository?.root ?? directory
 				const schema = JSON.stringify(z.toJSONSchema(responseSchema, { target: 'draft-07' }))
 				let value: unknown
 				if (name === 'codex') {
@@ -76,7 +78,9 @@ export function createAgent(name: AgentName): AgentAdapter {
 							'--config',
 							`model_reasoning_effort=${JSON.stringify(request.effort ?? 'xhigh')}`,
 							'--config',
-							'features.shell_tool=false',
+							`features.shell_tool=${String(research)}`,
+							'--config',
+							'approval_policy="never"',
 							'--config',
 							'web_search="disabled"',
 							'--config',
@@ -88,7 +92,7 @@ export function createAgent(name: AgentName): AgentAdapter {
 							'-',
 						],
 						{
-							cwd: directory,
+							cwd,
 							input: prompt(request),
 							signal: request.signal,
 							timeoutMs: request.timeoutMs,
@@ -105,7 +109,8 @@ export function createAgent(name: AgentName): AgentAdapter {
 							'--json-schema',
 							schema,
 							'--tools',
-							'',
+							research ? 'Read,Glob,Grep,Bash' : '',
+							'--safe-mode',
 							'--disable-slash-commands',
 							'--no-session-persistence',
 							'--setting-sources',
@@ -122,7 +127,7 @@ export function createAgent(name: AgentName): AgentAdapter {
 						],
 						{
 							allowFailure: true,
-							cwd: directory,
+							cwd,
 							input: prompt(request),
 							signal: request.signal,
 							timeoutMs: request.timeoutMs,
@@ -148,5 +153,6 @@ export function createAgent(name: AgentName): AgentAdapter {
 			}
 		},
 		name,
+		repositoryAccess: true,
 	}
 }

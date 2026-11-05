@@ -7,7 +7,6 @@ import type {
 	Category,
 	Change,
 	ChangelogPlan,
-	Evidence,
 	GenerateOptions,
 	GenerationRequest,
 	PackageInfo,
@@ -16,6 +15,7 @@ import type {
 	Repository,
 } from './types'
 import { createAgent, validateChanges } from './agents'
+import { researchEvidence, splitEvidence } from './batches'
 import { hash, readCache, writeCache } from './cache'
 import { findChangelog, mergeChanges, parseChangelog, updateMarkdown } from './changelog'
 import { loadConfig } from './config'
@@ -30,6 +30,7 @@ const checkpointSchema = z.object({
 	baseRef: z.string(),
 	contentHash: z.string(),
 	head: z.string(),
+	instructionVersion: z.literal(instructionVersion),
 	path: z.string(),
 })
 const HEADING_PREFIX = /^##\s+/v
@@ -45,51 +46,25 @@ type Context = {
 	repository: Repository
 }
 
-function splitEvidence(evidence: Evidence[], limit: number): Evidence[][] {
-	const batches: Evidence[][] = []
-	let batch: Evidence[] = []
-	let size = 0
-	for (const item of evidence) {
-		const chunkSize = Math.floor(limit / 8)
-		for (let offset = 0; offset < Math.max(item.text.length, 1); offset += chunkSize) {
-			const part = {
-				...item,
-				id: item.text.length > chunkSize ? `${item.id}#${offset}` : item.id,
-				text: item.text.slice(offset, offset + chunkSize),
-			}
-			const { length } = JSON.stringify(part)
-			if (size + length > limit && batch.length > 0) {
-				batches.push(batch)
-				batch = []
-				size = 0
-			}
-
-			batch.push(part)
-			size += length
-		}
-	}
-
-	if (batch.length > 0) {
-		batches.push(batch)
-	}
-
-	return batches
-}
-
 async function summarize(
 	context: Context,
 	pkg: PackageInfo,
 	release: Release,
 	existingEntries: string,
+	mode: 'initialize' | 'update',
 	from?: string,
 	onlyRepositoryFiles = false,
 ): Promise<Change[]> {
 	const { agent, options, plan, repository } = context
+	const excludeDirectories = onlyRepositoryFiles
+		? repository.packages.map((item) => item.directory)
+		: []
 	let evidence = await collectEvidence(
 		repository,
 		pkg,
 		from === undefined ? release : { ...release, previousRef: from },
-		onlyRepositoryFiles ? repository.packages.map((item) => item.directory) : [],
+		excludeDirectories,
+		agent.repositoryAccess !== true,
 	)
 	if (evidence.length === 0) {
 		return []
@@ -103,7 +78,11 @@ async function summarize(
 	}
 
 	const changes: Change[] = []
-	const batches = splitEvidence(evidence, options.maxInputChars ?? 80_000)
+	const limit = options.maxInputChars ?? 80_000
+	const batches =
+		agent.repositoryAccess === true
+			? [researchEvidence(evidence, limit)]
+			: splitEvidence(evidence, limit)
 	log.info(
 		`Summarizing ${pkg.name} ${release.version} (${batches.length} batch${batches.length === 1 ? '' : 'es'}).`,
 	)
@@ -113,40 +92,70 @@ async function summarize(
 			effort: options.effort,
 			evidence: batch,
 			existingEntries: mergeChanges(existingEntries, changes),
+			initialRelease: release.previousRef === undefined && from === undefined,
+			mode,
 			model: options.model,
 			packageName: pkg.name,
+			repository: {
+				directory: pkg.directory,
+				excludeDirectories,
+				from: from ?? release.previousRef,
+				root: repository.root,
+				to: release.ref,
+			},
 			scope: pkg.directory === '.' && repository.packages.length > 0 ? 'repository' : 'package',
 			signal: options.signal,
 			timeoutMs: options.timeoutMs ?? 1_200_000,
 			version: release.version,
 		}
-		const key = JSON.stringify({
-			...request,
-			agent: agent.cacheKey ?? agent.name,
-			instructions: instructionVersion,
-			signal: undefined,
-		})
-		const cached =
-			context.cacheDirectory === undefined
-				? undefined
-				: await readCache(context.cacheDirectory, key)
-		let generated: Change[] | undefined
-		if (cached !== undefined) {
-			try {
-				generated = validateChanges(cached, request)
-			} catch {
-				// A changed schema or corrupt cache must not block regeneration.
-			}
-		}
-
-		generated ??= validateChanges({ changes: await agent.generate(request) }, request)
-		changes.push(...generated)
-		if (context.cacheDirectory !== undefined) {
-			await writeCache(context.cacheDirectory, key, { changes: generated })
-		}
+		changes.push(...(await generateBatch(context, request)))
 	}
 
 	return changes
+}
+
+async function generateBatch(context: Context, request: GenerationRequest): Promise<Change[]> {
+	const { agent, cacheDirectory } = context
+	const key = JSON.stringify({
+		...request,
+		agent: agent.cacheKey ?? agent.name,
+		instructions: instructionVersion,
+		signal: undefined,
+	})
+	const cached = cacheDirectory === undefined ? undefined : await readCache(cacheDirectory, key)
+	if (cached !== undefined) {
+		try {
+			return validateChanges(cached, request)
+		} catch {
+			// A changed schema or corrupt cache must not block regeneration.
+		}
+	}
+
+	const changes = validateChanges({ changes: await agent.generate(request) }, request)
+	if (cacheDirectory !== undefined) {
+		await writeCache(cacheDirectory, key, { changes })
+	}
+
+	return changes
+}
+
+function recordCheckpoint(
+	context: Context,
+	file: string,
+	content: string,
+	release?: Release,
+): void {
+	if (release === undefined || context.options.cache === false) {
+		return
+	}
+
+	context.plan.checkpoints.push({
+		baseRef: release.previousRef ?? 'initial',
+		contentHash: hash(content),
+		head: context.repository.head,
+		instructionVersion,
+		path: file,
+	})
 }
 
 async function incrementalBase(
@@ -211,9 +220,11 @@ async function generatePackage(
 ): Promise<{ exception: boolean; releases: Release[]; summaries: ReleaseSummary[] }> {
 	const { plan, repository } = context
 	const file = await findChangelog(path.join(repository.root, pkg.directory))
+	const content = context.options.rebuild === true ? undefined : file.content
+	const mode = content === undefined ? 'initialize' : 'update'
 	const releases = await resolveReleases(repository, pkg, context.options, context.options.release)
-	const missing = missingReleases(releases, file.content)
-	const parsed = parseChangelog(file.content ?? '')
+	const missing = missingReleases(releases, content)
+	const parsed = parseChangelog(content ?? '')
 	const draft = parsed.sections.find((section) => section.version === 'Unreleased')
 	const newest = releases.findLast((release) => release.version !== 'Unreleased')
 	const entries: Parameters<typeof updateMarkdown>[1] = []
@@ -229,8 +240,8 @@ async function generatePackage(
 		const from =
 			existingBody === undefined
 				? undefined
-				: await incrementalBase(context, file.path, file.content, release)
-		const changes = await summarize(context, pkg, release, existingBody ?? '', from)
+				: await incrementalBase(context, file.path, content, release)
+		const changes = await summarize(context, pkg, release, existingBody ?? '', mode, from)
 		summaries.push({
 			changelogPath: file.path,
 			changes,
@@ -247,22 +258,14 @@ async function generatePackage(
 	}
 
 	const exception = await hasNodeException(repository, pkg, releases)
-	const after = updateMarkdown(file.content, entries, exception, repository.github)
+	const after = updateMarkdown(content, entries, exception, repository.github)
 	addAnchors(summaries, after)
 
 	if (after !== file.content) {
 		plan.files.push({ after, before: file.content, path: file.path })
 	}
 
-	const current = releases.at(-1)
-	if (current !== undefined && context.options.cache !== false) {
-		plan.checkpoints.push({
-			baseRef: current.previousRef ?? 'initial',
-			contentHash: hash(after),
-			head: repository.head,
-			path: file.path,
-		})
-	}
+	recordCheckpoint(context, file.path, after, releases.at(-1))
 
 	return { exception, releases, summaries }
 }
@@ -377,8 +380,9 @@ async function aggregateIndependent(
 ): Promise<void> {
 	const { plan, repository } = context
 	const file = await findChangelog(repository.root)
-	let { content } = file
-	const parsed = parseChangelog(file.content ?? '')
+	let content = context.options.rebuild === true ? undefined : file.content
+	const mode = content === undefined ? 'initialize' : 'update'
+	const parsed = parseChangelog(content ?? '')
 	const known = new Set(parsed.sections.map((section) => section.version))
 	const entries: Parameters<typeof updateMarkdown>[1] = []
 	const ordered = summaries.toSorted((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999'))
@@ -424,9 +428,17 @@ async function aggregateIndependent(
 	const draft = parseChangelog(content ?? '').sections.find(
 		(section) => section.version === 'Unreleased',
 	)?.body
-	const from = await incrementalBase(context, file.path, file.content, draftRelease)
+	const from = await incrementalBase(context, file.path, content, draftRelease)
 	unreleased.push(
-		...(await summarize(context, repository.rootPackage, draftRelease, draft ?? '', from, true)),
+		...(await summarize(
+			context,
+			repository.rootPackage,
+			draftRelease,
+			draft ?? '',
+			mode,
+			from,
+			true,
+		)),
 	)
 	if (unreleased.length > 0) {
 		entries.push({
@@ -441,14 +453,7 @@ async function aggregateIndependent(
 		plan.files.push({ after, before: file.content, path: file.path })
 	}
 
-	if (context.options.cache !== false) {
-		plan.checkpoints.push({
-			baseRef: base ?? 'initial',
-			contentHash: hash(after),
-			head: repository.head,
-			path: file.path,
-		})
-	}
+	recordCheckpoint(context, file.path, after, draftRelease)
 }
 
 /** Generate reviewable edits from Git history without changing tracked files. */
@@ -501,7 +506,7 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 		const rootFile = await findChangelog(root)
 		const needsPackageHistory =
 			!shared ||
-			missingReleases(rootReleases, rootFile.content).some(
+			missingReleases(rootReleases, resolved.rebuild === true ? undefined : rootFile.content).some(
 				(release) => release.version !== 'Unreleased',
 			)
 		let exception = false
@@ -528,7 +533,7 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 				})
 				// Rebuild only the newly generated sections; historical sections come from the original file.
 				rootEdit.after = updateMarkdown(
-					rootEdit.before,
+					resolved.rebuild === true ? undefined : rootEdit.before,
 					additions,
 					exception || result.exception,
 					repository.github,
