@@ -198,7 +198,7 @@ Chagent works nicely with the [bumpp](https://github.com/antfu-collective/bumpp)
 Execute chagent as part of the bump process:
 
 ```sh
-bumpp --all --commit "Release {version}." --execute "chagent -i"
+bumpp --all --execute "chagent -i"
 ```
 
 This runs the following sequence:
