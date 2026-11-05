@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { collectEvidence } from '../src/lib/evidence'
-import { git } from '../src/lib/process'
+import { git, readBlobs } from '../src/lib/process'
 import { hasNodeException, inspectRepository, resolveReleases } from '../src/lib/repository'
 import { commit, createRepository, writeFiles } from './helpers'
 
@@ -129,6 +129,86 @@ describe('release history', () => {
 		expect(repository.tags[0]?.commit).toBe(tagged)
 		const releases = await resolveReleases(repository, repository.rootPackage, {})
 		expect(releases.map((release) => release.version)).toEqual(['1.0.0', 'Unreleased'])
+	})
+
+	it('resolves lightweight, annotated, and nested tags to their commits', async () => {
+		const root = await createRepository()
+		const head = await git(root, ['rev-parse', 'HEAD'])
+		await git(root, ['tag', 'light'])
+		await git(root, ['tag', '-a', 'annotated', '-m', 'Annotated.'])
+		await git(root, ['tag', '-a', 'nested', '-m', 'Nested.', 'annotated'])
+		await git(root, ['tag', 'with,comma'])
+		await git(root, ['checkout', '-q', '-b', 'side'])
+		await writeFiles(root, { 'side.txt': 'Elsewhere.\n' })
+		await commit(root, 'Add a side file.')
+		await git(root, ['tag', 'unreachable'])
+		await git(root, ['checkout', '-q', 'main'])
+		const repository = await inspectRepository(root)
+		expect(repository.tags.map((tag) => tag.name)).toEqual([
+			'annotated',
+			'light',
+			'nested',
+			'with,comma',
+		])
+		expect(new Set(repository.tags.map((tag) => tag.commit))).toEqual(new Set([head]))
+		expect(repository.tags[0]?.date).toBe(await git(root, ['log', '-1', '--format=%cs']))
+	})
+
+	it('reports a merge once with the files from each parent and keeps its whole message', async () => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		await git(root, ['checkout', '-q', '-b', 'side'])
+		await writeFiles(root, { 'side.txt': 'Side.\n' })
+		await commit(root, 'Add the side file.')
+		await git(root, ['checkout', '-q', 'main'])
+		await writeFiles(root, { 'main.txt': 'Main.\n' })
+		await commit(root, 'Add the main file.')
+		await git(root, ['merge', '--no-ff', '-m', 'Merge the side.\n\nWith a body.', 'side'])
+		const merge = await git(root, ['rev-parse', 'HEAD'])
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		const evidence = await collectEvidence(repository, repository.rootPackage, releases.at(-1)!)
+		const merges = evidence.filter((item) => item.id === merge)
+		expect(merges).toHaveLength(1)
+		expect(merges[0]?.text).toContain('Merge the side.\n\nWith a body.\nFiles: ')
+		expect(merges[0]?.text).toContain('side.txt')
+		expect(merges[0]?.text).toContain('main.txt')
+		expect(new Set(evidence.map((item) => item.id)).size).toBe(evidence.length)
+	})
+
+	it('lists a renamed file under both names', async () => {
+		const root = await createRepository({ 'old-name.txt': 'Text.\n' })
+		await git(root, ['tag', 'v1.0.0'])
+		await git(root, ['mv', 'old-name.txt', 'new-name.txt'])
+		await commit(root, 'Rename a file.')
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		const evidence = await collectEvidence(repository, repository.rootPackage, releases.at(-1)!)
+		expect(evidence.at(-1)?.text).toContain('Files: new-name.txt, old-name.txt')
+	})
+
+	it('reads many objects, preserving UTF-8 and leaving out anything that is not a file', async () => {
+		const root = await createRepository({ 'dir/file.txt': '☕ → ✓\n', 'other.txt': 'Plain.\n' })
+		const blobs = await readBlobs(root, [
+			'HEAD:dir/file.txt',
+			'HEAD:dir',
+			'HEAD:missing.txt',
+			'HEAD:new\nline.txt',
+			'HEAD:other.txt',
+			'HEAD:other.txt',
+		])
+		expect(Object.fromEntries(blobs)).toEqual({
+			'HEAD:dir/file.txt': '☕ → ✓\n',
+			'HEAD:other.txt': 'Plain.\n',
+		})
+	})
+
+	it('reads more objects than fit in one batch', async () => {
+		const root = await createRepository({ 'file.txt': 'Text.\n' })
+		const missing = Array.from({ length: 600 }, (_, index) => `HEAD:missing-${index}.txt`)
+		const blobs = await readBlobs(root, [...missing, 'HEAD:file.txt'])
+		expect(blobs.get('HEAD:file.txt')).toBe('Text.\n')
+		expect(blobs.size).toBe(1)
 	})
 
 	it('retains documentation and maintenance evidence for historical research', async () => {

@@ -1,9 +1,10 @@
 import path from 'node:path'
 import { z } from 'zod'
 import type { Evidence, PackageInfo, Release, Repository } from './types'
-import { git, runCommand } from './process'
-import { isVersionOnlyChange, LOCKFILE_PATH, manifestAt } from './repository'
+import { git, readBlobs, runCommand } from './process'
+import { isVersionOnlyEdit, LOCKFILE_PATH, manifestAt } from './repository'
 
+const COMMIT_MARKER = '\u{1}'
 const GENERATED_DIRECTORY = /^(?:build|changelog|coverage|dist)(?:\/|$)/iv
 const GENERATED_ANYWHERE = /(?:^|\/)(?:changelog(?:\.md)?$|node_modules(?:\/|$))/iv
 
@@ -46,21 +47,77 @@ async function scopes(repository: Repository, pkg: PackageInfo, ref: string): Pr
 	return [...directories]
 }
 
-async function hasSourceChanges(root: string, files: string[], commit: string): Promise<boolean> {
+function isManifest(file: string): boolean {
+	return path.posix.basename(file) === 'package.json'
+}
+
+function manifestObjects(files: string[], before: string, after: string): string[] {
+	return files.flatMap((file) =>
+		isManifest(file) ? [`${before}:${file}`, `${after}:${file}`] : [],
+	)
+}
+
+function hasSourceChanges(files: string[], commit: string, blobs: Map<string, string>): boolean {
 	for (const file of files) {
 		if (LOCKFILE_PATH.test(file)) {
 			continue
 		}
 
 		if (
-			path.posix.basename(file) !== 'package.json' ||
-			!(await isVersionOnlyChange(root, file, commit + '^', commit))
+			!isManifest(file) ||
+			!isVersionOnlyEdit(blobs.get(`${commit}^:${file}`), blobs.get(`${commit}:${file}`))
 		) {
 			return true
 		}
 	}
 
 	return files.length > 0 && files.every((file) => LOCKFILE_PATH.test(file))
+}
+
+type CommitRecord = { files: string[]; id: string; message: string }
+
+/** Read commits and their changed files from one process. */
+async function commitsInRange(
+	root: string,
+	range: string,
+	paths: string[],
+): Promise<CommitRecord[]> {
+	const output = await git(root, [
+		'-c',
+		'log.diffMerges=separate',
+		'-c',
+		'log.showRoot=true',
+		'log',
+		'--no-show-signature',
+		'--no-renames',
+		'-m',
+		'--name-only',
+		'-z',
+		'--format=%x01%H%x00%B',
+		range,
+		'--',
+		...paths,
+	])
+	// Each record is a marked ID, the message, then file names; merges repeat per parent.
+	const commits = new Map<string, CommitRecord>()
+	const tokens = output.split('\0')
+	let current: CommitRecord | undefined
+	for (let index = 0; index < tokens.length; index++) {
+		const token = tokens[index]!
+		if (token.startsWith(COMMIT_MARKER)) {
+			const id = token.slice(COMMIT_MARKER.length)
+			index += 1
+			current = commits.get(id) ?? { files: [], id, message: tokens[index]!.trimEnd() }
+			commits.set(id, current)
+		} else if (current !== undefined && token !== '') {
+			const file = token.startsWith('\n') ? token.slice(1) : token
+			if (!current.files.includes(file)) {
+				current.files.push(file)
+			}
+		}
+	}
+
+	return commits.values().toArray()
 }
 
 /** Collect source changes, excluding generated notes and release-only commits. */
@@ -70,7 +127,7 @@ export async function collectEvidence(
 	release: Release,
 	excludeDirectories: string[] = [],
 ): Promise<Evidence[]> {
-	const { root } = repository
+	const { packages, root } = repository
 	const directories = await scopes(repository, pkg, release.ref)
 	const paths = [
 		...directories.map((directory) => `:(literal)${directory}`),
@@ -78,8 +135,7 @@ export async function collectEvidence(
 	]
 	const range =
 		release.previousRef === undefined ? release.ref : `${release.previousRef}..${release.ref}`
-	const emptyTree = await git(root, ['hash-object', '-t', 'tree', '--stdin'])
-	const from = release.previousRef ?? emptyTree
+	const from = release.previousRef ?? (await git(root, ['hash-object', '-t', 'tree', '--stdin']))
 	const changedOutput = await git(root, [
 		'diff',
 		'--no-ext-diff',
@@ -92,55 +148,43 @@ export async function collectEvidence(
 		'--',
 		...paths,
 	])
-	const changed: string[] = []
-	for (const file of changedOutput.split('\0')) {
-		if (file === '' || ignored(file, repository.packages)) {
-			continue
-		}
-
-		if (
-			path.posix.basename(file) === 'package.json' &&
-			(await isVersionOnlyChange(root, file, from, release.ref))
-		) {
-			continue
-		}
-
-		changed.push(file)
-	}
-
-	if (changed.length === 0) {
+	const candidates = changedOutput
+		.split('\0')
+		.filter((file) => file !== '' && !ignored(file, packages))
+	const rangeBlobs = await readBlobs(root, manifestObjects(candidates, from, release.ref))
+	const changed = new Set(
+		candidates.filter(
+			(file) =>
+				!isManifest(file) ||
+				!isVersionOnlyEdit(
+					rangeBlobs.get(`${from}:${file}`),
+					rangeBlobs.get(`${release.ref}:${file}`),
+				),
+		),
+	)
+	if (changed.size === 0) {
 		return []
 	}
 
-	const evidence: Evidence[] = []
-	const commitLog = await git(root, ['log', '--format=%H', range, '--', ...paths])
-	const commits = commitLog.split('\n').filter(Boolean)
-	for (const commit of commits) {
-		const commitFiles = await git(root, [
-			'diff-tree',
-			'--root',
-			'-m',
-			'--no-commit-id',
-			'--name-only',
-			'-r',
-			'-z',
-			commit,
-			'--',
-			...paths,
-		])
-		const files = commitFiles
-			.split('\0')
-			.filter((file) => file !== '' && !ignored(file, repository.packages))
-		if (
-			files.every((file) => !changed.includes(file)) ||
-			!(await hasSourceChanges(root, files, commit))
-		) {
-			continue
-		}
-
-		const message = await git(root, ['show', '-s', '--format=%B', commit])
-		evidence.push({ id: commit, kind: 'commit', text: `${message}\nFiles: ${files.join(', ')}` })
-	}
+	const commits = await commitsInRange(root, range, paths)
+	const sourceCommits = commits.map((item) => ({
+		...item,
+		files: item.files.filter((file) => !ignored(file, packages)),
+	}))
+	const commitBlobs = await readBlobs(
+		root,
+		sourceCommits.flatMap(({ files, id }) => manifestObjects(files, `${id}^`, id)),
+	)
+	const evidence: Evidence[] = sourceCommits
+		.filter(
+			({ files, id }) =>
+				files.some((file) => changed.has(file)) && hasSourceChanges(files, id, commitBlobs),
+		)
+		.map(({ files, id, message }) => ({
+			id,
+			kind: 'commit',
+			text: `${message}\nFiles: ${files.join(', ')}`,
+		}))
 
 	if (release.pending === true) {
 		const file = path.posix.join(pkg.directory, 'package.json')

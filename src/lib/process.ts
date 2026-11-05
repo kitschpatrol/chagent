@@ -3,10 +3,13 @@ import crossSpawn from 'cross-spawn'
 const STDOUT_LIMIT = 32_000_000
 const STDERR_LIMIT = 4_000_000
 const FAILURE_OUTPUT_LENGTH = 4000
+const OBJECT_BATCH_SIZE = 500
+const OBJECT_HEADER = /^[\da-f]+ (\w+) (\d+)$/v
 
 type CommandOptions = {
 	allowFailure?: boolean
 	cwd?: string
+	encoding?: BufferEncoding
 	env?: NodeJS.ProcessEnv
 	inherit?: boolean
 	input?: string
@@ -55,7 +58,7 @@ export async function runCommand(
 		const timer = setTimeout(stop, options.timeoutMs ?? 60_000, `${command} timed out.`)
 		timer.unref()
 		options.signal?.addEventListener('abort', abort, { once: true })
-		child.stdout?.setEncoding('utf8').on('data', (chunk: string) => {
+		child.stdout?.setEncoding(options.encoding ?? 'utf8').on('data', (chunk: string) => {
 			stdout += chunk
 			if (options.tailStdout === true) {
 				stdout = stdout.slice(-FAILURE_OUTPUT_LENGTH)
@@ -95,15 +98,23 @@ export async function runCommand(
 	})
 }
 
-/** Run Git without a shell, pager, or external diff driver. */
-export async function git(root: string, args: string[], allowFailure = false): Promise<string> {
+async function runGit(
+	root: string,
+	args: string[],
+	options: Pick<CommandOptions, 'allowFailure' | 'encoding' | 'input'> = {},
+): ReturnType<typeof runCommand> {
 	// eslint-disable-next-line ts/naming-convention -- Git defines these environment variable names.
 	const env = { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' }
-	const result = await runCommand('git', ['--no-pager', '-c', 'core.quotepath=false', ...args], {
-		allowFailure,
+	return runCommand('git', ['--no-pager', '-c', 'core.quotepath=false', ...args], {
+		...options,
 		cwd: root,
 		env,
 	})
+}
+
+/** Run Git without a shell, pager, or external diff driver. */
+export async function git(root: string, args: string[], allowFailure = false): Promise<string> {
+	const result = await runGit(root, args, { allowFailure })
 	return result.code === 0 ? result.stdout.trimEnd() : ''
 }
 
@@ -113,9 +124,46 @@ export async function isAncestor(
 	ancestor: string,
 	descendant: string,
 ): Promise<boolean> {
-	const result = await runCommand('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
+	const result = await runGit(root, ['merge-base', '--is-ancestor', ancestor, descendant], {
 		allowFailure: true,
-		cwd: root,
 	})
 	return result.code === 0
+}
+
+/**
+ * Read many files from Git, named like `commit:path/to/file`, without a process
+ * for each one.
+ *
+ * @returns Text by object name. Anything absent or not a file is left out.
+ */
+export async function readBlobs(root: string, objects: string[]): Promise<Map<string, string>> {
+	const blobs = new Map<string, string>()
+	// Names are newline-delimited, so a path containing a newline cannot be requested.
+	const names = [...new Set(objects)].filter((name) => !name.includes('\n'))
+	for (let start = 0; start < names.length; start += OBJECT_BATCH_SIZE) {
+		const batch = names.slice(start, start + OBJECT_BATCH_SIZE)
+		// Object sizes count bytes, which line up with characters only in latin1.
+		const { stdout } = await runGit(root, ['cat-file', '--batch'], {
+			encoding: 'latin1',
+			input: batch.join('\n') + '\n',
+		})
+		let offset = 0
+		for (const name of batch) {
+			const headerEnd = stdout.indexOf('\n', offset)
+			const header = OBJECT_HEADER.exec(stdout.slice(offset, headerEnd))
+			offset = headerEnd + 1
+			if (header === null) {
+				continue
+			}
+
+			const size = Number(header[2])
+			if (header[1] === 'blob') {
+				blobs.set(name, Buffer.from(stdout.slice(offset, offset + size), 'latin1').toString('utf8'))
+			}
+
+			offset += size + 1
+		}
+	}
+
+	return blobs
 }

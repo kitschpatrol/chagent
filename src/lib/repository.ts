@@ -7,11 +7,12 @@ import { z } from 'zod'
 import type { Config } from './config'
 import type { PackageInfo, Release, ReleaseContext, Repository } from './types'
 import { log } from './log'
-import { git, isAncestor } from './process'
+import { git, isAncestor, readBlobs } from './process'
 
 /** Matches package manager lockfile paths. */
 export const LOCKFILE_PATH =
 	/(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?)$/v
+const TAG_DECORATION = 'tag: refs/tags/'
 const GITHUB_REMOTE = /github\.com[:\/]([^\/]+\/[^\/]+?)(?:\.git)?$/v
 
 const manifestSchema = z.object({
@@ -52,29 +53,51 @@ function parseManifest(text: string, label: string): Manifest {
 	}
 }
 
+function manifestObject(directory: string, ref: string): string {
+	return `${ref}:${directory === '.' ? '' : directory + '/'}package.json`
+}
+
 /**
- * Read package metadata from a committed snapshot, never from generated notes.
+ * Read package metadata from committed snapshots, never from generated notes.
  * History can contain broken manifests, so an unreadable one counts as absent.
  */
+async function manifestsAt(
+	root: string,
+	directory: string,
+	refs: string[],
+): Promise<Map<string, Manifest>> {
+	const blobs = await readBlobs(
+		root,
+		refs.map((ref) => manifestObject(directory, ref)),
+	)
+	const manifests = new Map<string, Manifest>()
+	for (const ref of refs) {
+		const object = manifestObject(directory, ref)
+		const text = blobs.get(object)
+		if (text === undefined) {
+			continue
+		}
+
+		try {
+			manifests.set(ref, parseManifest(text, object))
+		} catch (error) {
+			log.warn(
+				`Ignoring a historical manifest. ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+	}
+
+	return manifests
+}
+
+/** Read package metadata from one committed snapshot. */
 export async function manifestAt(
 	root: string,
 	directory: string,
 	ref: string,
 ): Promise<Manifest | undefined> {
-	const object = `${ref}:${directory === '.' ? '' : directory + '/'}package.json`
-	const text = await git(root, ['show', object], true)
-	if (text === '') {
-		return undefined
-	}
-
-	try {
-		return parseManifest(text, object)
-	} catch (error) {
-		log.warn(
-			`Ignoring a historical manifest. ${error instanceof Error ? error.message : String(error)}`,
-		)
-		return undefined
-	}
+	const manifests = await manifestsAt(root, directory, [ref])
+	return manifests.get(ref)
 }
 
 function parseJsonObject(text: string): Record<string, unknown> | undefined {
@@ -87,19 +110,51 @@ function parseJsonObject(text: string): Record<string, unknown> | undefined {
 }
 
 /** Recognize release bookkeeping without dropping meaningful manifest changes. */
+export function isVersionOnlyEdit(before: string | undefined, after: string | undefined): boolean {
+	const oldValue = before === undefined ? undefined : parseJsonObject(before)
+	const newValue = after === undefined ? undefined : parseJsonObject(after)
+	return (
+		oldValue !== undefined &&
+		newValue !== undefined &&
+		isDeepStrictEqual({ ...oldValue, version: undefined }, { ...newValue, version: undefined })
+	)
+}
+
+/** Compare a manifest between two commits. */
 export async function isVersionOnlyChange(
 	root: string,
 	file: string,
 	beforeRef: string,
 	afterRef: string,
 ): Promise<boolean> {
-	const oldValue = parseJsonObject(await git(root, ['show', `${beforeRef}:${file}`], true))
-	const newValue = parseJsonObject(await git(root, ['show', `${afterRef}:${file}`], true))
-	return (
-		oldValue !== undefined &&
-		newValue !== undefined &&
-		isDeepStrictEqual({ ...oldValue, version: undefined }, { ...newValue, version: undefined })
-	)
+	const before = `${beforeRef}:${file}`
+	const after = `${afterRef}:${file}`
+	const blobs = await readBlobs(root, [before, after])
+	return isVersionOnlyEdit(blobs.get(before), blobs.get(after))
+}
+
+/** Read every tag reachable from a commit, resolved to its commit and date. */
+async function reachableTags(root: string, head: string): Promise<Repository['tags']> {
+	const output = await git(root, [
+		'log',
+		'--no-show-signature',
+		'--simplify-by-decoration',
+		'--decorate=full',
+		'--decorate-refs=refs/tags/',
+		'--format=%H%x00%cs%x00%D',
+		head,
+	])
+	const tags: Repository['tags'] = []
+	for (const line of output.split('\n')) {
+		const [commit = '', date = '', decorations = ''] = line.split('\0', 3)
+		for (const decoration of decorations.split(', ')) {
+			if (decoration.startsWith(TAG_DECORATION)) {
+				tags.push({ commit, date, name: decoration.slice(TAG_DECORATION.length) })
+			}
+		}
+	}
+
+	return tags.toSorted((a, b) => a.name.localeCompare(b.name))
 }
 
 /**
@@ -124,28 +179,7 @@ export async function inspectRepository(
 	const manifest = rootText === undefined ? undefined : parseManifest(rootText, 'package.json')
 	const packages = await workspacePackages(root, manifest, config)
 
-	const tagText = await git(root, [
-		'for-each-ref',
-		'--merged',
-		head,
-		'--format=%(refname:strip=2)',
-		'refs/tags',
-	])
-	const tags: Repository['tags'] = []
-	for (const name of tagText.split('\n')) {
-		if (name === '') {
-			continue
-		}
-
-		const commit = await git(root, ['rev-parse', 'refs/tags/' + name + '^{commit}'], true)
-		if (commit === '') {
-			continue
-		}
-
-		const date = await git(root, ['log', '-1', '--format=%cs', commit])
-		tags.push({ commit, date, name })
-	}
-
+	const tags = await reachableTags(root, head)
 	const remote = await git(root, ['remote', 'get-url', 'origin'], true)
 	const github = GITHUB_REMOTE.exec(remote)?.[1]
 	return {
@@ -242,18 +276,20 @@ export async function hasNodeException(
 	pkg: PackageInfo,
 	releases: Release[],
 ): Promise<boolean> {
+	const published = releases.filter(
+		(release) =>
+			release.version !== 'Unreleased' &&
+			release.pending !== true &&
+			semver.prerelease(release.version) === null,
+	)
+	const manifests = await manifestsAt(
+		repository.root,
+		pkg.directory,
+		published.map((release) => release.ref),
+	)
 	let previous: undefined | { node: string; version: string }
-	for (const release of releases) {
-		if (
-			release.version === 'Unreleased' ||
-			release.pending === true ||
-			semver.prerelease(release.version) !== null
-		) {
-			continue
-		}
-
-		const manifest = await manifestAt(repository.root, pkg.directory, release.ref)
-		const node = manifest?.engines?.node
+	for (const release of published) {
+		const node = manifests.get(release.ref)?.engines?.node
 		if (node === undefined || semver.validRange(node) === null) {
 			previous = undefined
 			continue
@@ -342,15 +378,26 @@ async function taggedReleases(
 	pkg: PackageInfo,
 	config: Pick<Config, 'tagPatterns'>,
 ): Promise<Release[]> {
-	const releases: Release[] = []
+	const candidates: Array<{ tag: Repository['tags'][number]; version: string }> = []
 	for (const tag of repository.tags) {
 		const version = tagVersion(tag.name, pkg, config.tagPatterns)
-		if (version === undefined) {
-			continue
+		if (version !== undefined) {
+			candidates.push({ tag, version })
 		}
+	}
 
-		const manifest = await manifestAt(repository.root, pkg.directory, tag.commit)
-		if (pkg.directory !== '.') {
+	const isRoot = pkg.directory === '.'
+	const manifests = isRoot
+		? new Map<string, Manifest>()
+		: await manifestsAt(
+				repository.root,
+				pkg.directory,
+				candidates.map(({ tag }) => tag.commit),
+			)
+	const releases: Release[] = []
+	for (const { tag, version } of candidates) {
+		if (!isRoot) {
+			const manifest = manifests.get(tag.commit)
 			if (manifest?.version !== undefined && semver.valid(manifest.version) !== version) {
 				continue
 			}
