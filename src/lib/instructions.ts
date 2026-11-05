@@ -20,8 +20,7 @@ you may inspect related files for context. The supplied evidence is a starting
 point, not a limit on your research. Without repository, use the supplied evidence.
 
 When mode is initialize, reconstruct this release as part of the project's full
-historical changelog, as the release-notes skill's init workflow does. When mode
-is update, cover all missing changes in the supplied range. In both modes, review
+historical changelog. When mode is update, cover all missing changes in the supplied range. In both modes, review
 every commit, diff, and associated PR before deciding what to include. A changelog
 records the evolution of the project, including maintenance releases; it is not
 just a list of new application features.
@@ -109,8 +108,7 @@ generated artifacts, formatting noise, or changes already covered by existing
 entries. Do not pad the result with unsupported changes.`
 
 export const historyInstructions = `This request contains the complete set of release ranges to
-research together. Work through the history in one shared investigation, as the
-original release-notes init workflow does. Read the overall commit history first,
+research together. Work through the history in one shared investigation. Read the overall commit history first,
 learn the project once, and inspect the relevant diffs and historical files as
 needed. Reuse that understanding across versions and packages. Do not repeat a
 full project audit independently for every release.
