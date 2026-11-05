@@ -1,7 +1,9 @@
 import { realpath } from 'node:fs/promises'
 import path from 'node:path'
+import semver from 'semver'
 import type { GenerationContext as Context } from './jobs'
 import type { ChangelogPlan, GenerateOptions } from './types'
+import { engines } from '../../package.json' with { type: 'json' }
 import { createAgent } from './agents'
 import { parseChangelog } from './changelog'
 import { loadConfig, resolveConfig } from './config'
@@ -13,8 +15,19 @@ import { git } from './process'
 import { inspectRepository } from './repository'
 import { generateWorkspace } from './workspace'
 
+/**
+ * Package managers only warn about unsupported engines, so refuse before an
+ * agent session rather than fail afterward on a missing API.
+ */
+export function assertSupportedNode(version = process.versions.node): void {
+	if (!semver.satisfies(version, engines.node, { includePrerelease: true })) {
+		throw new Error(`chagent requires Node.js ${engines.node}, but this is Node.js ${version}.`)
+	}
+}
+
 /** Generate reviewable edits from Git history without changing tracked files. */
 export async function generateChangelog(options: GenerateOptions = {}): Promise<ChangelogPlan> {
+	assertSupportedNode()
 	const cwd = options.cwd ?? process.cwd()
 	const root = await realpath(await git(cwd, ['rev-parse', '--show-toplevel']))
 	const {

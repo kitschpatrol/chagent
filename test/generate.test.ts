@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { AgentAdapter, Category, GenerationRequest } from '../src/lib/types'
 import { writeCache } from '../src/lib/cache'
 import { changelogHeader, parseChangelog } from '../src/lib/changelog'
-import { generateChangelog } from '../src/lib/generate'
+import { assertSupportedNode, generateChangelog } from '../src/lib/generate'
 import { git } from '../src/lib/process'
 import { previewChangelog } from '../src/lib/review'
 import { writeChangelog } from '../src/lib/write'
@@ -380,6 +380,18 @@ describe('generation and writing', () => {
 		expect(plan.files[0]?.after).toContain(
 			'[1.1.0]: https://github.com/example/fixture/compare/v1.0.0...v1.1.0',
 		)
+	})
+
+	it.each(['24.16.0', '26.13.0', '27.0.0-pre'])('accepts Node.js %s', (version) => {
+		expect(() => {
+			assertSupportedNode(version)
+		}).not.toThrow()
+	})
+
+	it.each(['22.23.4', '24.15.0', '26.2.0'])('refuses Node.js %s', (version) => {
+		expect(() => {
+			assertSupportedNode(version)
+		}).toThrow(`chagent requires Node.js ^24.16.0 || >=26.3.0, but this is Node.js ${version}.`)
 	})
 
 	it('keeps an existing changelog when a rebuild finds nothing to record', async () => {
