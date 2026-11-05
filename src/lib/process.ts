@@ -8,6 +8,67 @@ const FAILURE_OUTPUT_LENGTH = 4000
 const LOGGED_COMMAND_LENGTH = 300
 const OBJECT_BATCH_SIZE = 500
 const OBJECT_HEADER = /^[\da-f]+ (\w+) (\d+)$/v
+const TERMINATING_SIGNALS = ['SIGHUP', 'SIGINT', 'SIGTERM'] as const
+
+/** Process groups of running detached commands. */
+const groups = new Set<number>()
+const signalListeners = new Map<NodeJS.Signals, () => void>()
+
+function killGroup(pid: number): void {
+	try {
+		process.kill(-pid, 'SIGKILL')
+	} catch {
+		// The group may have exited already.
+	}
+}
+
+function removeSignalListeners(): void {
+	for (const [signal, listener] of signalListeners) {
+		process.off(signal, listener)
+	}
+
+	signalListeners.clear()
+}
+
+/**
+ * Detached commands never receive the terminal's signals, so a signal that
+ * would end this process by default must stop them first. Hosts with their own
+ * handler, like the CLI, keep responsibility for cancelling.
+ */
+function trackGroup(pid: number): void {
+	if (groups.size === 0) {
+		for (const signal of TERMINATING_SIGNALS) {
+			if (process.listenerCount(signal) > 0) {
+				continue
+			}
+
+			const listener = () => {
+				for (const group of groups) {
+					killGroup(group)
+				}
+
+				groups.clear()
+				removeSignalListeners()
+				// Restore the default action, which ends the process with this signal.
+				if (process.listenerCount(signal) === 0) {
+					process.kill(process.pid, signal)
+				}
+			}
+
+			signalListeners.set(signal, listener)
+			process.on(signal, listener)
+		}
+	}
+
+	groups.add(pid)
+}
+
+function untrackGroup(pid: number): void {
+	groups.delete(pid)
+	if (groups.size === 0) {
+		removeSignalListeners()
+	}
+}
 
 type CommandOptions = {
 	allowFailure?: boolean
@@ -54,19 +115,20 @@ export async function runCommand(
 			stdio: options.inherit === true ? 'inherit' : 'pipe',
 			windowsHide: true,
 		})
+		const group = detached ? child.pid : undefined
+		if (group !== undefined) {
+			trackGroup(group)
+		}
+
 		let stdout = ''
 		let stderr = ''
 		let failure: Error | undefined
 		const stop = (message: string) => {
 			failure = new Error(message)
-			try {
-				if (!detached || child.pid === undefined) {
-					child.kill('SIGKILL')
-				} else {
-					process.kill(-child.pid, 'SIGKILL')
-				}
-			} catch {
-				// The process may have exited just before cancellation.
+			if (group === undefined) {
+				child.kill('SIGKILL')
+			} else {
+				killGroup(group)
 			}
 		}
 
@@ -101,6 +163,10 @@ export async function runCommand(
 		child.on('close', (code) => {
 			clearTimeout(timer)
 			options.signal?.removeEventListener('abort', abort)
+			if (group !== undefined) {
+				untrackGroup(group)
+			}
+
 			const exitCode = code ?? 1
 			log.debug(
 				`Finished ${command} (exit ${exitCode}) in ${Math.round(performance.now() - started)} ms.`,

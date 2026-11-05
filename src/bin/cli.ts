@@ -75,12 +75,11 @@ function createReporter(verbose: boolean, signal: AbortSignal) {
 }
 
 const controller = new AbortController()
-process.once('SIGINT', () => {
-	controller.abort()
-})
-process.once('SIGTERM', () => {
-	controller.abort()
-})
+for (const signal of ['SIGHUP', 'SIGINT', 'SIGTERM'] as const) {
+	process.once(signal, () => {
+		controller.abort()
+	})
+}
 
 const cli = yargs(hideBin(process.argv))
 

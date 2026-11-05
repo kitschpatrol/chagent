@@ -1,6 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { changelogHeader } from '../src/lib/changelog'
@@ -79,6 +80,18 @@ async function cliCalls(
 			.trim()
 			.split('\n')
 			.map((line): unknown => JSON.parse(line)),
+	)
+}
+
+async function runningAgent(root: string): Promise<{ pid: number }> {
+	return vi.waitFor(
+		async () => {
+			const calls = await cliCalls(root)
+			const call = calls.find(({ name }) => name === 'codex')
+			expect(call).toBeDefined()
+			return call!
+		},
+		{ interval: 50, timeout: 10_000 },
 	)
 }
 
@@ -306,24 +319,16 @@ console.log('Process chatter excluded from the output.');
 	}, 15_000)
 
 	// Windows has no catchable signal to send a child process.
-	it.skipIf(process.platform === 'win32')(
-		'cancels running agents and restores the cursor on interrupt',
-		async () => {
+	it.skipIf(process.platform === 'win32').each(['SIGINT', 'SIGHUP'] as const)(
+		'cancels running agents and restores the cursor on %s',
+		async (signal) => {
 			const root = await createRepository()
 			await installCliFixtures(root, 60_000)
 			const { child, exit, output } = startInFakeTerminal(root, '--no-cache', '--no-github')
-			const agent = await vi.waitFor(
-				async () => {
-					const calls = await cliCalls(root)
-					const call = calls.find(({ name }) => name === 'codex')
-					expect(call).toBeDefined()
-					return call
-				},
-				{ interval: 50, timeout: 10_000 },
-			)
-			child.kill('SIGINT')
+			const agent = await runningAgent(root)
+			child.kill(signal)
 			expect(await exit).toBe(1)
-			expect(() => process.kill(agent?.pid ?? 0, 0)).toThrow()
+			expect(() => process.kill(agent.pid, 0)).toThrow()
 			const cursorRestored = output.stderr.indexOf('\u{1B}[?25h')
 			expect(cursorRestored).toBeGreaterThan(-1)
 			expect(output.stderr.indexOf('codex was cancelled.')).toBeGreaterThan(cursorRestored)
@@ -361,6 +366,40 @@ setTimeout(() => {}, 60000);
 			child.kill('SIGINT')
 			expect(await exit).toBeUndefined()
 			expect(child.signalCode).toBe('SIGINT')
+		},
+		15_000,
+	)
+
+	it.skipIf(process.platform === 'win32').each(['SIGINT', 'SIGHUP', 'SIGTERM'] as const)(
+		'stops running agents when a library host without handlers receives %s',
+		async (signal) => {
+			const root = await createRepository()
+			await installCliFixtures(root, 60_000)
+			const library = pathToFileURL(path.resolve(import.meta.dirname, '../dist/lib/index.js')).href
+			const host = spawn(
+				process.execPath,
+				[
+					'--input-type=module',
+					'--eval',
+					`import { generateChangelog } from ${JSON.stringify(library)}\nawait generateChangelog({ cache: false, github: false })`,
+				],
+				{ cwd: root },
+			)
+			const exit = new Promise<void>((resolve) => {
+				host.once('close', () => {
+					resolve()
+				})
+			})
+			const agent = await runningAgent(root)
+			host.kill(signal)
+			await exit
+			expect(host.signalCode).toBe(signal)
+			await vi.waitFor(
+				() => {
+					expect(() => process.kill(agent.pid, 0)).toThrow()
+				},
+				{ interval: 50, timeout: 3000 },
+			)
 		},
 		15_000,
 	)
