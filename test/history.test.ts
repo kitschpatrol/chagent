@@ -48,6 +48,20 @@ describe('release history', () => {
 		expect(committed.at(-1)).toMatchObject({ pending: true, version: '1.0.1' })
 	})
 
+	it('notes a Node upgrade in the pending minor release that makes it', async () => {
+		const root = await createRepository({
+			'package.json': '{"name":"example","version":"1.0.0","engines":{"node":">=20"}}',
+		})
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, {
+			'package.json': '{"name":"example","version":"1.1.0","engines":{"node":">=24"}}',
+		})
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		expect(releases.at(-1)).toMatchObject({ pending: true, version: '1.1.0' })
+		expect(await hasNodeException(repository, repository.rootPackage, releases)).toBe(true)
+	})
+
 	it('does not treat Node upgrades in major releases as exceptions', async () => {
 		const root = await createRepository()
 		await git(root, ['tag', 'v1.0.0'])

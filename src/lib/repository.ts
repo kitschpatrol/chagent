@@ -100,6 +100,12 @@ async function manifestsAt(
 	return manifests
 }
 
+async function workingManifest(root: string, directory: string): Promise<Manifest | undefined> {
+	const file = path.posix.join(directory, 'package.json')
+	const text = await readOptional(path.join(root, file))
+	return text === undefined ? undefined : parseManifest(text, file)
+}
+
 /** Read package metadata from one committed snapshot. */
 export async function manifestAt(
 	root: string,
@@ -296,28 +302,30 @@ export async function resolveReleases(
 }
 
 /**
- * Detect stable minor/patch releases that raised the minimum Node.js
- * requirement.
+ * Detect stable minor/patch releases, including one about to be published,
+ * that raised the minimum Node.js requirement.
  */
 export async function hasNodeException(
 	repository: Repository,
 	pkg: PackageInfo,
 	releases: Release[],
 ): Promise<boolean> {
-	const published = releases.filter(
-		(release) =>
-			release.version !== 'Unreleased' &&
-			release.pending !== true &&
-			semver.prerelease(release.version) === null,
+	const stable = releases.filter(
+		(release) => release.version !== 'Unreleased' && semver.prerelease(release.version) === null,
 	)
 	const manifests = await manifestsAt(
 		repository.root,
 		pkg.directory,
-		published.map((release) => release.ref),
+		stable.filter((release) => release.pending !== true).map((release) => release.ref),
 	)
+	// A pending release is published from the working tree, where its version was bumped.
+	const pending = stable.some((release) => release.pending === true)
+		? await workingManifest(repository.root, pkg.directory)
+		: undefined
 	let previous: undefined | { node: string; version: string }
-	for (const release of published) {
-		const node = manifests.get(release.ref)?.engines?.node
+	for (const release of stable) {
+		const manifest = release.pending === true ? pending : manifests.get(release.ref)
+		const node = manifest?.engines?.node
 		if (node === undefined || semver.validRange(node) === null) {
 			previous = undefined
 			continue
