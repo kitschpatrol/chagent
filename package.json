@@ -51,7 +51,7 @@
 		"fix": "pnpm build && ksc fix",
 		"lint": "pnpm build && ksc lint",
 		"release": "bumpp --commit 'Release: %s' && pnpm build && pnpm publish --otp $(op item get npm --otp)",
-		"test": "vitest run"
+		"test": "pnpm build && vitest run"
 	},
 	"dependencies": {
 		"@clack/prompts": "^1.8.1",
