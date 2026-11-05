@@ -39,8 +39,9 @@ const fs = require('node:fs');
 const args = process.argv.slice(2);
 fs.writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(args));
 const input = JSON.parse(fs.readFileSync(0, 'utf8').split('Input data (JSON):\n')[1]);
-if (process.cwd() !== input.repository.root) process.exit(9);
-const result = { changes: [{ category: 'Added', description: 'Support an additional export.', breaking: false, sources: [input.evidence[0].id] }] };
+if (process.cwd() !== (input.repositoryRoot ?? input.repository.root)) process.exit(9);
+const changes = (release) => [{ category: 'Added', description: 'Support an additional export.', breaking: false, sources: [release.evidence[0].id] }];
+const result = input.releases ? { releases: input.releases.map((release) => ({ id: release.id, changes: changes(release) })) } : { changes: changes(input) };
 if (${JSON.stringify(name)} === 'codex') {
   fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], JSON.stringify(result));
   console.log('Unstructured process chatter that must never reach the changelog.');
@@ -85,6 +86,29 @@ if (${JSON.stringify(name)} === 'codex') {
 							'xhigh',
 						]
 			expect(args).toEqual(expect.arrayContaining(expected))
+			const history = await createAgent(name).generateHistory!({
+				releases: [
+					{
+						evidence: request.evidence,
+						existingEntries: '',
+						id: 'first',
+						packageName: 'example',
+						version: '1.0.0',
+					},
+					{
+						evidence: [{ id: 'def', kind: 'range', text: 'Inspect the next release.' }],
+						existingEntries: '',
+						id: 'second',
+						packageName: 'example',
+						version: '1.0.1',
+					},
+				],
+				repositoryRoot: root,
+				timeoutMs: 5000,
+			})
+			expect(history.map((release) => release.id)).toEqual(['first', 'second'])
+			expect(history.map((release) => release.changes[0]?.sources)).toEqual([['abc'], ['def']])
+			expect(JSON.parse(await readFile(argsFile, 'utf8'))).toEqual(expect.arrayContaining(expected))
 		},
 	)
 

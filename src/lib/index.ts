@@ -16,6 +16,9 @@ export type {
 	FileEdit,
 	GenerateOptions,
 	GenerationRequest,
+	HistoryChangeSet,
+	HistoryRelease,
+	HistoryRequest,
 	ReleaseContext,
 	ReleaseSummary,
 } from './types'

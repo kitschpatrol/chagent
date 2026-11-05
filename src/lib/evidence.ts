@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { z } from 'zod'
 import type { Evidence, PackageInfo, Release, Repository } from './types'
 import { git, runCommand } from './process'
 import { isVersionOnlyChange, manifestAt } from './repository'
@@ -255,8 +256,80 @@ export async function enrichReleaseDates(
 	}
 }
 
+const associatedPullsSchema = z.object({
+	data: z.object({
+		repository: z.record(
+			z.string(),
+			z
+				.object({
+					associatedPullRequests: z.object({
+						nodes: z.array(
+							z
+								.object({
+									body: z.string(),
+									mergedAt: z.string().nullable(),
+									number: z.number(),
+									title: z.string(),
+									url: z.string(),
+								})
+								.nullable(),
+						),
+						pageInfo: z.object({ endCursor: z.string().nullable(), hasNextPage: z.boolean() }),
+					}),
+				})
+				.nullable(),
+		),
+	}),
+})
+
+type PullLookup = { commit: string; cursor?: string }
+
+function recordPulls(
+	pulls: Map<number, Evidence>,
+	nodes: NonNullable<
+		z.infer<typeof associatedPullsSchema>['data']['repository'][string]
+	>['associatedPullRequests']['nodes'],
+	commit: string,
+): void {
+	for (const pull of nodes) {
+		if (typeof pull?.mergedAt !== 'string') {
+			continue
+		}
+
+		const previous = pulls.get(pull.number)
+		pulls.set(pull.number, {
+			commits: [...new Set([...(previous?.commits ?? []), commit])],
+			id: `pr:${pull.number}`,
+			kind: 'pull-request',
+			text: JSON.stringify(pull),
+		})
+	}
+}
+
+async function associatedPulls(repository: Repository, batch: PullLookup[], signal?: AbortSignal) {
+	const [owner, name] = repository.github!.split('/', 2)
+	const fields = batch
+		.map(
+			(item, index) => `c${index}: object(oid: ${JSON.stringify(item.commit)}) {
+		... on Commit { associatedPullRequests(first: 100${item.cursor === undefined ? '' : `, after: ${JSON.stringify(item.cursor)}`}) {
+			nodes { number title body url mergedAt }
+			pageInfo { hasNextPage endCursor }
+		} }
+	}`,
+		)
+		.join('\n')
+	const query = `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`
+	const result = await runCommand('gh', ['api', 'graphql', '--input', '-'], {
+		cwd: repository.root,
+		input: JSON.stringify({ query, variables: { name, owner } }),
+		signal,
+		timeoutMs: 15_000,
+	})
+	return associatedPullsSchema.parse(JSON.parse(result.stdout)).data.repository
+}
+
 /**
- * Add PR context by commit association; release-note bodies are never
+ * Add PR context in batches of commits; release-note bodies are never
  * requested.
  */
 export async function enrichWithGithub(
@@ -269,49 +342,26 @@ export async function enrichWithGithub(
 		return evidence
 	}
 
-	const extra: Evidence[] = []
-	const seen = new Set<number>()
+	const pulls = new Map<number, Evidence>()
+	const commits = new Set(evidence.filter((item) => item.kind === 'commit').map((item) => item.id))
+	const pending: PullLookup[] = Array.from(commits, (commit) => ({ commit }))
 	try {
-		for (const item of evidence) {
-			if (item.kind !== 'commit') {
-				continue
-			}
-
-			const result = await runCommand(
-				'gh',
-				[
-					'api',
-					'--paginate',
-					`repos/${repository.github}/commits/${item.id}/pulls`,
-					'--jq',
-					'.[] | {number, title, body, html_url, merged_at}',
-				],
-				{ cwd: repository.root, signal, timeoutMs: 15_000 },
-			)
-			for (const line of result.stdout.split('\n')) {
-				if (line === '') {
+		while (pending.length > 0) {
+			signal?.throwIfAborted()
+			const batch = pending.splice(0, 25)
+			const result = await associatedPulls(repository, batch, signal)
+			for (const [index, item] of batch.entries()) {
+				const connection = result[`c${index}`]?.associatedPullRequests
+				if (connection === undefined) {
+					// Local release commits may not have been pushed to GitHub yet.
 					continue
 				}
 
-				const value: unknown = JSON.parse(line)
-				if (
-					typeof value !== 'object' ||
-					value === null ||
-					!('number' in value) ||
-					typeof value.number !== 'number' ||
-					!('merged_at' in value) ||
-					value.merged_at === null ||
-					seen.has(value.number)
-				) {
-					continue
-				}
+				recordPulls(pulls, connection.nodes, item.commit)
 
-				seen.add(value.number)
-				extra.push({
-					id: `pr:${value.number}`,
-					kind: 'pull-request',
-					text: `Associated commit: ${item.id}\n${line}`,
-				})
+				if (connection.pageInfo.hasNextPage && connection.pageInfo.endCursor !== null) {
+					pending.push({ commit: item.commit, cursor: connection.pageInfo.endCursor })
+				}
 			}
 		}
 	} catch (error) {
@@ -322,5 +372,5 @@ export async function enrichWithGithub(
 		}
 	}
 
-	return [...evidence, ...extra]
+	return [...evidence, ...pulls.values()]
 }

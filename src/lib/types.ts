@@ -19,9 +19,31 @@ export type Change = {
 }
 
 export type Evidence = {
+	/** Git commits associated with pull-request evidence. */
+	commits?: string[]
 	id: string
 	kind: 'commit' | 'diff' | 'manifest' | 'pull-request' | 'range'
 	text: string
+}
+
+export type HistoryRelease = Omit<
+	GenerationRequest,
+	'effort' | 'model' | 'signal' | 'timeoutMs'
+> & {
+	id: string
+}
+
+export type HistoryRequest = Pick<
+	GenerationRequest,
+	'effort' | 'model' | 'signal' | 'timeoutMs'
+> & {
+	releases: HistoryRelease[]
+	repositoryRoot: string
+}
+
+export type HistoryChangeSet = {
+	changes: Change[]
+	id: string
 }
 
 export type GenerationRequest = {
@@ -53,6 +75,11 @@ export type AgentAdapter = {
 	/** Change this identifier when the adapter's generation behavior changes. */
 	cacheKey?: string
 	generate: (request: GenerationRequest) => Promise<Change[]>
+	/**
+	 * Research several release ranges together, sharing project context in one
+	 * session.
+	 */
+	generateHistory?: (request: HistoryRequest) => Promise<HistoryChangeSet[]>
 	name: string
 	/**
 	 * The adapter can inspect Git history directly instead of requiring supplied

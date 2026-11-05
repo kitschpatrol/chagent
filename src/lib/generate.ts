@@ -2,26 +2,24 @@ import { realpath } from 'node:fs/promises'
 import path from 'node:path'
 import semver from 'semver'
 import { z } from 'zod'
+import type { GenerationContext as Context, GenerationJob } from './generation'
 import type {
-	AgentAdapter,
 	Category,
 	Change,
 	ChangelogPlan,
 	GenerateOptions,
-	GenerationRequest,
 	PackageInfo,
 	Release,
 	ReleaseSummary,
 	Repository,
 } from './types'
-import { createAgent, validateChanges } from './agents'
-import { researchEvidence, splitEvidence } from './batches'
-import { hash, readCache, writeCache } from './cache'
-import { findChangelog, mergeChanges, parseChangelog, updateMarkdown } from './changelog'
+import { createAgent } from './agents'
+import { hash, readCache } from './cache'
+import { findChangelog, parseChangelog, updateMarkdown } from './changelog'
 import { loadConfig } from './config'
-import { collectEvidence, enrichReleaseDates, enrichWithGithub } from './evidence'
+import { enrichReleaseDates } from './evidence'
+import { generateJobs, prepareGeneration } from './generation'
 import { instructionVersion } from './instructions'
-import { log } from './log'
 import { git, runCommand } from './process'
 import { hasNodeException, inspectRepository, resolveReleases } from './repository'
 import { categories } from './types'
@@ -38,105 +36,20 @@ const INLINE_LINK = /\[([^\]]+)\]\([^\)]*\)/gv
 const ANCHOR_PUNCTUATION = /[^\p{L}\p{N}_\s\-]/gv
 const ANCHOR_SPACE = /\s/gv
 const LINE_BOUNDARY = /(?<=\n)/v
-type Context = {
-	agent: AgentAdapter
-	cacheDirectory?: string
-	options: GenerateOptions
-	plan: ChangelogPlan
-	repository: Repository
+type PackagePlan = {
+	content?: string
+	exception: boolean
+	file: Awaited<ReturnType<typeof findChangelog>>
+	releases: Release[]
+	summaries: ReleaseSummary[]
+	work: Array<{ existingBody?: string; job: GenerationJob; release: Release; shouldWrite: boolean }>
 }
 
-async function summarize(
-	context: Context,
-	pkg: PackageInfo,
-	release: Release,
-	existingEntries: string,
-	mode: 'initialize' | 'update',
-	from?: string,
-	onlyRepositoryFiles = false,
-): Promise<Change[]> {
-	const { agent, options, plan, repository } = context
-	const excludeDirectories = onlyRepositoryFiles
-		? repository.packages.map((item) => item.directory)
-		: []
-	let evidence = await collectEvidence(
-		repository,
-		pkg,
-		from === undefined ? release : { ...release, previousRef: from },
-		excludeDirectories,
-		agent.repositoryAccess !== true,
-	)
-	if (evidence.length === 0) {
-		return []
-	}
-
-	if (
-		options.github !== false &&
-		plan.diagnostics.every((message) => !message.startsWith('GitHub enrichment unavailable'))
-	) {
-		evidence = await enrichWithGithub(repository, evidence, plan.diagnostics, options.signal)
-	}
-
-	const changes: Change[] = []
-	const limit = options.maxInputChars ?? 80_000
-	const batches =
-		agent.repositoryAccess === true
-			? [researchEvidence(evidence, limit)]
-			: splitEvidence(evidence, limit)
-	log.info(
-		`Summarizing ${pkg.name} ${release.version} (${batches.length} batch${batches.length === 1 ? '' : 'es'}).`,
-	)
-	for (const batch of batches) {
-		options.signal?.throwIfAborted()
-		const request: GenerationRequest = {
-			effort: options.effort,
-			evidence: batch,
-			existingEntries: mergeChanges(existingEntries, changes),
-			initialRelease: release.previousRef === undefined && from === undefined,
-			mode,
-			model: options.model,
-			packageName: pkg.name,
-			repository: {
-				directory: pkg.directory,
-				excludeDirectories,
-				from: from ?? release.previousRef,
-				root: repository.root,
-				to: release.ref,
-			},
-			scope: pkg.directory === '.' && repository.packages.length > 0 ? 'repository' : 'package',
-			signal: options.signal,
-			timeoutMs: options.timeoutMs ?? 1_200_000,
-			version: release.version,
-		}
-		changes.push(...(await generateBatch(context, request)))
-	}
-
-	return changes
-}
-
-async function generateBatch(context: Context, request: GenerationRequest): Promise<Change[]> {
-	const { agent, cacheDirectory } = context
-	const key = JSON.stringify({
-		...request,
-		agent: agent.cacheKey ?? agent.name,
-		instructions: instructionVersion,
-		signal: undefined,
-	})
-	const cached = cacheDirectory === undefined ? undefined : await readCache(cacheDirectory, key)
-	if (cached !== undefined) {
-		try {
-			return validateChanges(cached, request)
-		} catch {
-			// A changed schema or corrupt cache must not block regeneration.
-		}
-	}
-
-	const changes = validateChanges({ changes: await agent.generate(request) }, request)
-	if (cacheDirectory !== undefined) {
-		await writeCache(cacheDirectory, key, { changes })
-	}
-
-	return changes
+type IndependentPlan = {
+	content?: string
+	file: Awaited<ReturnType<typeof findChangelog>>
+	job: GenerationJob
+	release: Release
 }
 
 function recordCheckpoint(
@@ -213,12 +126,13 @@ function missingReleases(releases: Release[], content = ''): Release[] {
 	)
 }
 
-async function generatePackage(
+async function preparePackage(
 	context: Context,
 	pkg: PackageInfo,
 	aggregateHistory = false,
-): Promise<{ exception: boolean; releases: Release[]; summaries: ReleaseSummary[] }> {
-	const { plan, repository } = context
+	aggregateContent?: string,
+): Promise<PackagePlan> {
+	const { repository } = context
 	const file = await findChangelog(path.join(repository.root, pkg.directory))
 	const content = context.options.rebuild === true ? undefined : file.content
 	const mode = content === undefined ? 'initialize' : 'update'
@@ -227,11 +141,31 @@ async function generatePackage(
 	const parsed = parseChangelog(content ?? '')
 	const draft = parsed.sections.find((section) => section.version === 'Unreleased')
 	const newest = releases.findLast((release) => release.version !== 'Unreleased')
-	const entries: Parameters<typeof updateMarkdown>[1] = []
+	const work: PackagePlan['work'] = []
 	const summaries: ReleaseSummary[] = []
 	for (const release of releases) {
 		const shouldWrite = missing.includes(release)
 		if (!shouldWrite && !aggregateHistory) {
+			continue
+		}
+
+		const summary: ReleaseSummary = {
+			changelogPath: file.path,
+			changes: [],
+			date: release.date,
+			packageDirectory: pkg.directory,
+			packageName: pkg.name,
+			ref: release.ref,
+			tag: release.tag,
+			version: release.version,
+		}
+		summaries.push(summary)
+		// Retain release boundaries without regenerating summaries already present at the root.
+		if (
+			!shouldWrite &&
+			aggregateContent !== undefined &&
+			missingPackageSummaries([summary], aggregateContent).length === 0
+		) {
 			continue
 		}
 
@@ -241,23 +175,25 @@ async function generatePackage(
 			existingBody === undefined
 				? undefined
 				: await incrementalBase(context, file.path, content, release)
-		const changes = await summarize(context, pkg, release, existingBody ?? '', mode, from)
-		summaries.push({
-			changelogPath: file.path,
-			changes,
-			date: release.date,
-			packageDirectory: pkg.directory,
-			packageName: pkg.name,
-			ref: release.ref,
-			tag: release.tag,
-			version: release.version,
-		})
-		if (shouldWrite && (release.version !== 'Unreleased' || changes.length > 0)) {
-			entries.push({ changes, existingBody, release })
-		}
+		const job = await prepareGeneration(context, pkg, release, existingBody ?? '', mode, from)
+		work.push({ existingBody, job, release, shouldWrite })
+		summary.changes = job.changes
 	}
 
 	const exception = await hasNodeException(repository, pkg, releases)
+	return { content, exception, file, releases, summaries, work }
+}
+
+function renderPackage(context: Context, prepared: PackagePlan): void {
+	const { plan, repository } = context
+	const { content, exception, file, releases, summaries, work } = prepared
+	const entries: Parameters<typeof updateMarkdown>[1] = []
+	for (const { existingBody, job, release, shouldWrite } of work) {
+		if (shouldWrite && (release.version !== 'Unreleased' || job.changes.length > 0)) {
+			entries.push({ changes: job.changes, existingBody, release })
+		}
+	}
+
 	const after = updateMarkdown(content, entries, exception, repository.github)
 	addAnchors(summaries, after)
 
@@ -266,8 +202,6 @@ async function generatePackage(
 	}
 
 	recordCheckpoint(context, file.path, after, releases.at(-1))
-
-	return { exception, releases, summaries }
 }
 
 function packageLink(repository: Repository, summary: ReleaseSummary): string {
@@ -373,40 +307,75 @@ function promotePackageDraft(
 	}
 }
 
-async function aggregateIndependent(
+function missingPackageSummaries(summaries: ReleaseSummary[], content = ''): ReleaseSummary[] {
+	const parsed = parseChangelog(content)
+	const known = new Set(parsed.sections.map((section) => section.version))
+	return summaries
+		.toSorted((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999'))
+		.filter((summary) => {
+			if (
+				summary.version === 'Unreleased' ||
+				known.has(`${summary.packageName}@${summary.version}`)
+			) {
+				return false
+			}
+
+			return parsed.sections.every((section) => {
+				const prefix = summary.packageName + '@'
+				const version = section.version.startsWith(prefix)
+					? section.version.slice(prefix.length)
+					: ''
+				return semver.valid(version) === null || semver.lt(version, summary.version)
+			})
+		})
+}
+
+async function prepareIndependent(
 	context: Context,
 	summaries: ReleaseSummary[],
-	exception: boolean,
-): Promise<void> {
-	const { plan, repository } = context
+): Promise<IndependentPlan> {
+	const { repository } = context
 	const file = await findChangelog(repository.root)
-	let content = context.options.rebuild === true ? undefined : file.content
-	const mode = content === undefined ? 'initialize' : 'update'
-	const parsed = parseChangelog(content ?? '')
-	const known = new Set(parsed.sections.map((section) => section.version))
+	const content = context.options.rebuild === true ? undefined : file.content
+	let remaining = content
+	for (const summary of missingPackageSummaries(summaries, content)) {
+		remaining = promotePackageDraft(remaining, summary, repository).content
+	}
+
+	const releaseRefs = new Set(
+		summaries.filter((summary) => summary.version !== 'Unreleased').map((summary) => summary.ref),
+	)
+	const ancestors = await git(repository.root, ['rev-list', '--topo-order', repository.head])
+	const base = ancestors.split('\n').find((ref) => releaseRefs.has(ref))
+	const release: Release = { previousRef: base, ref: repository.head, version: 'Unreleased' }
+	const draft = parseChangelog(remaining ?? '').sections.find(
+		(section) => section.version === 'Unreleased',
+	)?.body
+	const from = await incrementalBase(context, file.path, remaining, release)
+	const job = await prepareGeneration(
+		context,
+		repository.rootPackage,
+		release,
+		draft ?? '',
+		content === undefined ? 'initialize' : 'update',
+		from,
+		true,
+	)
+	return { content, file, job, release }
+}
+
+function aggregateIndependent(
+	context: Context,
+	prepared: IndependentPlan,
+	summaries: ReleaseSummary[],
+	exception: boolean,
+): void {
+	const { plan, repository } = context
+	const { file } = prepared
+	let { content } = prepared
 	const entries: Parameters<typeof updateMarkdown>[1] = []
-	const ordered = summaries.toSorted((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999'))
-	for (const summary of ordered) {
-		if (summary.version === 'Unreleased') {
-			continue
-		}
-
+	for (const summary of missingPackageSummaries(summaries, content)) {
 		const label = `${summary.packageName}@${summary.version}`
-		if (known.has(label)) {
-			continue
-		}
-
-		const versions = parsed.sections
-			.map((section) =>
-				section.version.startsWith(summary.packageName + '@')
-					? section.version.slice(summary.packageName.length + 1)
-					: '',
-			)
-			.filter((version) => semver.valid(version) !== null)
-		if (versions.some((version) => semver.gte(version, summary.version))) {
-			continue
-		}
-
 		const promoted = promotePackageDraft(content, summary, repository)
 		content = promoted.content
 		entries.push({
@@ -419,27 +388,10 @@ async function aggregateIndependent(
 		repository,
 		summaries.filter((summary) => summary.version === 'Unreleased'),
 	)
-	const releaseRefs = new Set(
-		summaries.filter((summary) => summary.version !== 'Unreleased').map((summary) => summary.ref),
-	)
-	const ancestors = await git(repository.root, ['rev-list', '--topo-order', repository.head])
-	const base = ancestors.split('\n').find((ref) => releaseRefs.has(ref))
-	const draftRelease: Release = { previousRef: base, ref: repository.head, version: 'Unreleased' }
 	const draft = parseChangelog(content ?? '').sections.find(
 		(section) => section.version === 'Unreleased',
 	)?.body
-	const from = await incrementalBase(context, file.path, content, draftRelease)
-	unreleased.push(
-		...(await summarize(
-			context,
-			repository.rootPackage,
-			draftRelease,
-			draft ?? '',
-			mode,
-			from,
-			true,
-		)),
-	)
+	unreleased.push(...prepared.job.changes)
 	if (unreleased.length > 0) {
 		entries.push({
 			changes: unreleased,
@@ -453,7 +405,83 @@ async function aggregateIndependent(
 		plan.files.push({ after, before: file.content, path: file.path })
 	}
 
-	recordCheckpoint(context, file.path, after, draftRelease)
+	recordCheckpoint(context, file.path, after, prepared.release)
+}
+
+function aggregateShared(context: Context, prepared: PackagePlan, exception: boolean): void {
+	const { plan, repository } = context
+	renderPackage(context, prepared)
+	const rootEdit = plan.files.find((file) => path.dirname(file.path) === repository.root)
+	if (rootEdit === undefined) {
+		return
+	}
+
+	const additions = prepared.summaries.map((summary) => ({
+		changes: aggregateChanges(
+			repository,
+			plan.releases.filter((item) => item.version === summary.version),
+		),
+		existingBody: parseChangelog(rootEdit.after).sections.find(
+			(section) => section.version === summary.version,
+		)?.body,
+		release: prepared.releases.find((item) => item.version === summary.version)!,
+	}))
+	rootEdit.after = updateMarkdown(
+		prepared.content,
+		additions,
+		exception || prepared.exception,
+		repository.github,
+	)
+}
+
+async function generateWorkspace(context: Context): Promise<void> {
+	const { options, plan, repository } = context
+	const rootReleases = await resolveReleases(
+		repository,
+		repository.rootPackage,
+		options,
+		options.release,
+	)
+	const shared = rootReleases.some((release) => release.version !== 'Unreleased')
+	const rootFile = await findChangelog(repository.root)
+	const needsPackageHistory =
+		!shared ||
+		missingReleases(rootReleases, options.rebuild === true ? undefined : rootFile.content).some(
+			(release) => release.version !== 'Unreleased',
+		)
+	const packages: PackagePlan[] = []
+	for (const pkg of repository.packages) {
+		packages.push(
+			await preparePackage(
+				context,
+				pkg,
+				needsPackageHistory,
+				shared || options.rebuild === true ? undefined : rootFile.content,
+			),
+		)
+	}
+
+	const summaries = packages.flatMap((pkg) => pkg.summaries)
+	const root = shared ? await preparePackage(context, repository.rootPackage) : undefined
+	const independent = shared ? undefined : await prepareIndependent(context, summaries)
+	const jobs = packages.flatMap((pkg) => pkg.work.map((item) => item.job))
+	jobs.push(...(root?.work.map((item) => item.job) ?? []))
+	if (independent !== undefined) {
+		jobs.push(independent.job)
+	}
+
+	await generateJobs(context, jobs)
+	for (const pkg of packages) {
+		renderPackage(context, pkg)
+		plan.releases.push(...pkg.summaries)
+	}
+
+	const exception = packages.some((pkg) => pkg.exception)
+	if (root !== undefined) {
+		aggregateShared(context, root, exception)
+	} else if (independent !== undefined) {
+		aggregateIndependent(context, independent, summaries, exception)
+	}
 }
 
 /** Generate reviewable edits from Git history without changing tracked files. */
@@ -493,55 +521,15 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 		repository,
 	}
 	if (repository.packages.length === 0) {
-		const result = await generatePackage(context, repository.rootPackage)
+		const result = await preparePackage(context, repository.rootPackage)
+		await generateJobs(
+			context,
+			result.work.map((item) => item.job),
+		)
+		renderPackage(context, result)
 		plan.releases.push(...result.summaries)
 	} else {
-		const rootReleases = await resolveReleases(
-			repository,
-			repository.rootPackage,
-			resolved,
-			resolved.release,
-		)
-		const shared = rootReleases.some((release) => release.version !== 'Unreleased')
-		const rootFile = await findChangelog(root)
-		const needsPackageHistory =
-			!shared ||
-			missingReleases(rootReleases, resolved.rebuild === true ? undefined : rootFile.content).some(
-				(release) => release.version !== 'Unreleased',
-			)
-		let exception = false
-		for (const pkg of repository.packages) {
-			const result = await generatePackage(context, pkg, needsPackageHistory)
-			exception ||= result.exception
-			plan.releases.push(...result.summaries)
-		}
-
-		if (shared) {
-			const result = await generatePackage(context, repository.rootPackage)
-			const rootEdit = plan.files.find((file) => path.dirname(file.path) === root)
-			if (rootEdit) {
-				const additions = result.summaries.map((summary) => {
-					const packageSummaries = plan.releases.filter((item) => item.version === summary.version)
-					const release = rootReleases.find((item) => item.version === summary.version)!
-					return {
-						changes: aggregateChanges(repository, packageSummaries),
-						existingBody: parseChangelog(rootEdit.after).sections.find(
-							(section) => section.version === summary.version,
-						)?.body,
-						release,
-					}
-				})
-				// Rebuild only the newly generated sections; historical sections come from the original file.
-				rootEdit.after = updateMarkdown(
-					resolved.rebuild === true ? undefined : rootEdit.before,
-					additions,
-					exception || result.exception,
-					repository.github,
-				)
-			}
-		} else {
-			await aggregateIndependent(context, plan.releases, exception)
-		}
+		await generateWorkspace(context)
 	}
 
 	return plan
