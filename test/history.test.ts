@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { collectEvidence } from '../src/lib/evidence'
 import { git, readBlobs } from '../src/lib/process'
 import { hasNodeException, inspectRepository, resolveReleases } from '../src/lib/repository'
@@ -310,6 +310,25 @@ describe('release history', () => {
 		const repository = await inspectRepository(root)
 		const releases = await resolveReleases(repository, repository.rootPackage, { tagPatterns })
 		expect(releases.at(-1)).toMatchObject({ pending: true, tag, version: '1.1.0' })
+	})
+
+	it.each([
+		['Pacific/Kiritimati', '2026-11-06'],
+		['America/New_York', '2026-11-05'],
+	])('dates a pending release in local time (%s)', async (zone, date) => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'package.json': '{"name":"example","version":"1.1.0"}' })
+		const repository = await inspectRepository(root)
+		vi.stubEnv('TZ', zone)
+		vi.useFakeTimers({ now: new Date('2026-11-06T02:00:00Z'), toFake: ['Date'] })
+		try {
+			const releases = await resolveReleases(repository, repository.rootPackage, {})
+			expect(releases.at(-1)).toMatchObject({ date, pending: true })
+		} finally {
+			vi.useRealTimers()
+			vi.unstubAllEnvs()
+		}
 	})
 
 	it('excludes version-only release commits from PR enrichment evidence', async () => {

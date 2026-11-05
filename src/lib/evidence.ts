@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { Evidence, PackageInfo, Release, Repository } from './types'
 import { log } from './log'
 import { git, readBlobs, runCommand } from './process'
-import { isVersionOnlyEdit, LOCKFILE_PATH, manifestAt } from './repository'
+import { isVersionOnlyEdit, localDate, LOCKFILE_PATH, manifestAt } from './repository'
 
 const COMMIT_MARKER = '\u{1}'
 const GENERATED_DIRECTORY = /^(?:build|changelog|coverage|dist)(?:\/|$)/iv
@@ -264,7 +264,7 @@ export async function enrichReleaseDates(
 
 			const tag = repository.tags.find((item) => item.name === value.tag_name)
 			if (tag && !Number.isNaN(Date.parse(value.published_at))) {
-				tag.date = new Date(value.published_at).toISOString().slice(0, 10)
+				tag.date = localDate(new Date(value.published_at))
 			}
 		}
 

@@ -29,6 +29,16 @@ const manifestSchema = z.object({
 
 type Manifest = z.infer<typeof manifestSchema>
 
+/**
+ * Format a release date in local time, matching the date its publisher saw
+ * rather than the date in UTC.
+ */
+export function localDate(date = new Date()): string {
+	return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+		.map((part) => String(part).padStart(2, '0'))
+		.join('-')
+}
+
 /** Read an optional UTF-8 file, distinguishing absence from other I/O failures. */
 export async function readOptional(file: string): Promise<string | undefined> {
 	try {
@@ -265,7 +275,7 @@ export async function resolveReleases(
 
 	if (pending && currentVersion !== undefined) {
 		releases.push({
-			date: context?.date ?? new Date().toISOString().slice(0, 10),
+			date: context?.date ?? localDate(),
 			pending: true,
 			previousRef: latest?.ref,
 			previousTag: latest?.tag,

@@ -3,6 +3,7 @@ import type { ChangelogPlan, GenerateOptions } from './types'
 import { generateChangelog } from './generate'
 import { git } from './process'
 import { createProgressLine } from './progress'
+import { localDate } from './repository'
 import { assertReviewTerminal, reviewChangelog } from './review'
 import { writeChangelog } from './write'
 
@@ -25,10 +26,9 @@ function tagName(
 		return undefined
 	}
 
-	const now = new Date()
 	const [major = '', minor = '', patch = ''] = version.split('-', 1)[0]!.split('.', 3)
 	const tokens: Record<string, string> = {
-		date: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+		date: localDate(),
 		major,
 		minor,
 		oldVersion,
