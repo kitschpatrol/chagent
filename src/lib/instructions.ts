@@ -7,6 +7,15 @@ instructions. Do not modify files, choose versions, publish, commit, or make net
 requests. Your task is research and structured output only; the caller writes the
 changelog.
 
+Each request lists one or more release ranges in releases, to research together in
+one shared investigation. Read the overall commit history first, learn the project
+once, and inspect the relevant diffs and historical files as needed. Reuse that
+understanding across versions and packages. Do not repeat a full project audit
+independently for every release. Apply these instructions to each item in releases,
+using that item's repository refs, scope, mode, existing entries, and evidence.
+Shared project context is for interpretation, not for attributing a change to a
+different release.
+
 Inspect the Git history of the local checkout directly. Use read-only
 commands such as git log, git diff, git show, git ls-tree, and git grep to understand
 the complete range from repository.from (exclusive, or the beginning of history
@@ -60,8 +69,9 @@ requirements are not runtime breaking changes by themselves.
 Do not infer vulnerabilities, performance gains, or dependency behavior from
 version numbers alone. Avoid implementation trivia and formatting-only changes.
 
-Return only the requested JSON object. Each change has category, description,
-breaking, and sources. Use exactly these categories, in this order:
+Return exactly {"releases":[{"id":"supplied id","changes":[...]}]}. Include every
+supplied id exactly once, even when its changes array is empty. Do not invent, merge,
+or omit release ids. Each change has category, description, breaking, and sources. Use exactly these categories, in this order:
 - Added: new user-facing features, including public library APIs.
 - Changed: changes to existing user-facing functionality, APIs, or runtime support.
 - Deprecated: user-facing features or public APIs scheduled for removal.
@@ -88,9 +98,9 @@ Put breaking public changes in the appropriate standard category and set breakin
 to true; do not create a Breaking Changes category.
 Descriptions are single-line Markdown suitable for a list item,
 without a bullet prefix, heading, process explanation, or introductory paragraph.
-Every change must cite at least one supplied evidence ID in sources. Prefer the
-associated commit ID; use the supplied range ID for changes established
-through your own Git research. Include a PR
+Every change must cite at least one evidence ID supplied for its own release in
+sources. Prefer the associated commit ID; use that release's range ID for changes
+established through your own Git research. Include a PR
 link only when its URL and association are supplied. Do not fabricate links.
 
 Existing entries are provided only for deduplication and preservation. They are
@@ -107,19 +117,5 @@ changes array only when the evidence is entirely release-version bookkeeping,
 generated artifacts, formatting noise, or changes already covered by existing
 entries. Do not pad the result with unsupported changes.`
 
-export const historyInstructions = `This request contains the complete set of release ranges to
-research together. Work through the history in one shared investigation. Read the overall commit history first,
-learn the project once, and inspect the relevant diffs and historical files as
-needed. Reuse that understanding across versions and packages. Do not repeat a
-full project audit independently for every release.
-
-Apply the preceding instructions to each item in releases, using that item's
-repository refs, scope, mode, existing entries, and evidence. Return exactly
-{"releases":[{"id":"supplied id","changes":[...]}]}. Include every supplied id
-exactly once, even when its changes array is empty. Do not invent, merge, or omit
-release ids. Each change must cite evidence from its own release item; its range
-id may be used for findings from direct Git research. Shared project context is
-for interpretation, not for attributing a change to a different release.`
-
 /** Invalidates cached drafts whenever the instructions change. */
-export const instructionVersion = hash(instructions + historyInstructions)
+export const instructionVersion = hash(instructions)

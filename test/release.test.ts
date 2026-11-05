@@ -12,14 +12,19 @@ import { commit, createRepository, writeFiles } from './helpers'
 const agent: AgentAdapter = {
 	async generate(request) {
 		await Promise.resolve()
-		return [
-			{
-				breaking: false,
-				category: 'Added',
-				description: 'Support examples.',
-				sources: [request.evidence[0]!.id],
-			},
-		]
+		return {
+			releases: request.releases.map((release) => ({
+				changes: [
+					{
+						breaking: false,
+						category: 'Added',
+						description: 'Support examples.',
+						sources: [release.evidence[0]!.id],
+					},
+				],
+				id: release.id,
+			})),
+		}
 	},
 	name: 'fixture',
 }

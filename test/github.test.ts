@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type { GenerationJob } from '../src/lib/generation'
 import type * as processModule from '../src/lib/process'
-import type { AgentAdapter, Evidence, HistoryRequest, Repository } from '../src/lib/types'
+import type { AgentAdapter, Evidence, GenerationRequest, Repository } from '../src/lib/types'
 import { defaults } from '../src/lib/defaults'
 import { enrichWithGithub } from '../src/lib/evidence'
 import { generateChangelog } from '../src/lib/generate'
 import { generateJobs } from '../src/lib/generation'
 import { git, runCommand } from '../src/lib/process'
-import { createRepository } from './helpers'
+import { createRepository, describeReleases } from './helpers'
 
 vi.mock('../src/lib/process', async (importOriginal) => ({
 	...(await importOriginal<typeof processModule>()),
@@ -143,14 +143,7 @@ describe('batched GitHub enrichment', () => {
 			agent: {
 				async generate(request) {
 					await Promise.resolve()
-					return [
-						{
-							breaking: false,
-							category: 'Added',
-							description: 'Add a feature.',
-							sources: [request.evidence[0]!.id],
-						},
-					]
+					return describeReleases(request)
 				},
 				name: 'fixture',
 			},
@@ -163,23 +156,22 @@ describe('batched GitHub enrichment', () => {
 
 	it('deduplicates lookups across releases and scopes PR evidence to associated commits', async () => {
 		vi.mocked(runCommand).mockResolvedValue(response({ c0: connection(1), c1: connection(2) }))
-		const generateHistory = vi.fn(async (request: HistoryRequest) => {
+		const generate = vi.fn(async (request: GenerationRequest) => {
 			await Promise.resolve()
-			return request.releases.map((release) => ({ changes: [], id: release.id }))
+			return { releases: request.releases.map((release) => ({ changes: [], id: release.id })) }
 		})
-		const agent: AgentAdapter = {
-			generate: vi.fn(),
-			generateHistory,
-			name: 'fixture',
-		}
+		const agent: AgentAdapter = { generate, name: 'fixture' }
 		const jobs: GenerationJob[] = ['first', 'second', 'first'].map((id, index) => ({
 			changes: [],
 			request: {
 				evidence: [commit(id)],
 				existingEntries: '',
+				id: `package-${index}@1.0.0`,
+				initialRelease: false,
+				mode: 'update',
 				packageName: `package-${index}`,
-				repository: { directory: '.', excludeDirectories: [], root: '/example', to: 'head' },
-				timeoutMs: 5000,
+				repository: { directory: '.', excludeDirectories: [], to: 'head' },
+				scope: 'package',
 				version: '1.0.0',
 			},
 		}))
@@ -201,8 +193,8 @@ describe('batched GitHub enrichment', () => {
 		)
 		expect(runCommand).toHaveBeenCalledOnce()
 		expect(queries()[0]?.match(/object\(oid:/gv)).toHaveLength(2)
-		expect(generateHistory).toHaveBeenCalledOnce()
-		const { releases } = generateHistory.mock.calls[0]![0]
+		expect(generate).toHaveBeenCalledOnce()
+		const { releases } = generate.mock.calls[0]![0]
 		expect(
 			releases.map((release) =>
 				release.evidence.filter((item) => item.kind === 'pull-request').map((item) => item.id),

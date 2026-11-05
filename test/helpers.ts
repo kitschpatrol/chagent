@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { onTestFinished } from 'vitest'
+import type { Category, GenerationRequest, GenerationResponse } from '../src/lib/types'
 import { git } from '../src/lib/process'
 
 /**
@@ -53,4 +54,24 @@ export async function writeFiles(root: string, files: Record<string, string>): P
 export async function commit(root: string, message: string): Promise<void> {
 	await git(root, ['add', '--all'])
 	await git(root, ['commit', '-m', message])
+}
+
+/** Respond to an adapter request with one cited change for each release. */
+export function describeReleases(
+	request: GenerationRequest,
+	category: Category = 'Changed',
+): GenerationResponse {
+	return {
+		releases: request.releases.map((release) => ({
+			changes: [
+				{
+					breaking: false,
+					category,
+					description: `Improve ${release.packageName} in ${release.version}.`,
+					sources: [release.evidence[0]!.id],
+				},
+			],
+			id: release.id,
+		})),
+	}
 }

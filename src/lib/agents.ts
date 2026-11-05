@@ -6,60 +6,37 @@ import type {
 	AgentAdapter,
 	AgentName,
 	Change,
+	ChangeSet,
 	GenerationRequest,
-	HistoryChangeSet,
-	HistoryRequest,
+	GenerationResponse,
+	ReleaseRequest,
 } from './types'
-import { defaultModels, defaults } from './defaults'
-import { historyInstructions, instructions } from './instructions'
+import { defaultModels } from './defaults'
+import { instructions } from './instructions'
 import { runCommand } from './process'
 import { categories } from './types'
 
 const CONTROL_CHARACTERS = /\p{Cc}/v
 const LIST_OR_HEADING = /^(?:#{1,6}\s|[\-*]\s|\d+\.\s)/v
 const responseSchema = z.strictObject({
-	changes: z.array(
+	releases: z.array(
 		z.strictObject({
-			breaking: z.boolean(),
-			category: z.enum(categories),
-			description: z.string().min(1).max(1000),
-			sources: z.array(z.string()).min(1),
+			changes: z.array(
+				z.strictObject({
+					breaking: z.boolean(),
+					category: z.enum(categories),
+					description: z.string().min(1).max(1000),
+					sources: z.array(z.string()).min(1),
+				}),
+			),
+			id: z.string(),
 		}),
 	),
 })
-const historyResponseSchema = z.strictObject({
-	releases: z.array(z.strictObject({ changes: responseSchema.shape.changes, id: z.string() })),
-})
+const responseJsonSchema = JSON.stringify(z.toJSONSchema(responseSchema, { target: 'draft-07' }))
 
-/**
- * Validate completeness, release identity, and citations before accepting any
- * historical output.
- */
-export function validateHistory(value: unknown, request: HistoryRequest): HistoryChangeSet[] {
-	const { releases } = historyResponseSchema.parse(value)
-	const expected = new Map(request.releases.map((release) => [release.id, release]))
-	const seen = new Set<string>()
-	for (const release of releases) {
-		const input = expected.get(release.id)
-		if (input === undefined || seen.has(release.id)) {
-			throw new Error('Agent history output contains an unknown or duplicate release id.')
-		}
-
-		validateChanges({ changes: release.changes }, { ...input, timeoutMs: request.timeoutMs })
-		seen.add(release.id)
-	}
-
-	if (seen.size !== expected.size) {
-		throw new Error('Agent history output omitted requested releases.')
-	}
-
-	return releases
-}
-
-/** Validate both structured output and its evidence references before rendering. */
-export function validateChanges(value: unknown, request: GenerationRequest): Change[] {
-	const { changes } = responseSchema.parse(value)
-	const ids = new Set(request.evidence.map((item) => item.id))
+function validateChanges(changes: Change[], release: ReleaseRequest): void {
+	const ids = new Set(release.evidence.map((item) => item.id))
 	for (const change of changes) {
 		if (change.sources.some((source) => !ids.has(source))) {
 			throw new Error('Agent output cites evidence that was not supplied.')
@@ -73,148 +50,149 @@ export function validateChanges(value: unknown, request: GenerationRequest): Cha
 			throw new Error('Agent output contains a heading, multiline entry, or hidden markup.')
 		}
 	}
-
-	return changes
 }
 
-function prompt(request: GenerationRequest): string {
-	return `${instructions}\n\nInput data (JSON):\n${JSON.stringify({ evidence: request.evidence, existingEntries: request.existingEntries, initialRelease: request.initialRelease ?? false, mode: request.mode ?? 'update', packageName: request.packageName, repository: request.repository, scope: request.scope ?? 'package', version: request.version })}`
-}
-
-type Invocation = Pick<GenerationRequest, 'effort' | 'model' | 'signal' | 'timeoutMs'> & {
-	cwd: string
-}
-
-async function invokeAgent(
-	name: AgentName,
-	request: Invocation,
-	input: string,
-	responseFormat: z.ZodType,
-): Promise<unknown> {
-	const directory = await mkdtemp(path.join(os.tmpdir(), 'chagent-agent-'))
-	try {
-		const { cwd } = request
-		const schema = JSON.stringify(z.toJSONSchema(responseFormat, { target: 'draft-07' }))
-		let value: unknown
-		if (name === 'codex') {
-			const schemaPath = path.join(directory, 'schema.json')
-			const outputPath = path.join(directory, 'response.json')
-			await writeFile(schemaPath, schema)
-			await runCommand(
-				'codex',
-				[
-					'exec',
-					'--skip-git-repo-check',
-					'--sandbox',
-					'read-only',
-					'--ephemeral',
-					'--ignore-user-config',
-					'--ignore-rules',
-					'--color',
-					'never',
-					'--json',
-					'--model',
-					request.model ?? defaultModels.codex,
-					'--config',
-					`model_reasoning_effort=${JSON.stringify(request.effort ?? defaults.effort)}`,
-					'--config',
-					'features.shell_tool=true',
-					'--config',
-					'approval_policy="never"',
-					'--config',
-					'web_search="disabled"',
-					'--config',
-					'project_doc_max_bytes=0',
-					'--output-schema',
-					schemaPath,
-					'--output-last-message',
-					outputPath,
-					'-',
-				],
-				{
-					cwd,
-					input,
-					signal: request.signal,
-					timeoutMs: request.timeoutMs,
-				},
-			)
-			value = JSON.parse(await readFile(outputPath, 'utf8'))
-		} else {
-			const result = await runCommand(
-				'claude',
-				[
-					'--print',
-					'--output-format',
-					'json',
-					'--json-schema',
-					schema,
-					'--tools',
-					'Read,Glob,Grep,Bash',
-					'--safe-mode',
-					'--disable-slash-commands',
-					'--no-session-persistence',
-					'--setting-sources',
-					'',
-					'--strict-mcp-config',
-					'--mcp-config',
-					'{"mcpServers":{}}',
-					'--permission-mode',
-					'dontAsk',
-					'--model',
-					request.model ?? defaultModels.claude,
-					'--effort',
-					request.effort ?? defaults.effort,
-				],
-				{
-					allowFailure: true,
-					cwd,
-					input,
-					signal: request.signal,
-					timeoutMs: request.timeoutMs,
-				},
-			)
-			if (result.stdout.trim() === '') {
-				throw new Error(`Claude generation failed: ${result.stderr.trim()}`)
-			}
-
-			const envelope = z.record(z.string(), z.unknown()).parse(JSON.parse(result.stdout))
-			if (envelope.is_error === true) {
-				throw new Error(
-					`Claude generation failed: ${typeof envelope.result === 'string' ? envelope.result : 'No structured result.'}`,
-				)
-			}
-
-			value = envelope.structured_output
+/**
+ * Validate structure, completeness, release identity, and citations before
+ * accepting any adapter's output.
+ */
+export function validateResponse(value: unknown, releases: ReleaseRequest[]): ChangeSet[] {
+	const response = responseSchema.parse(value)
+	const expected = new Map(releases.map((release) => [release.id, release]))
+	const seen = new Set<string>()
+	for (const { changes, id } of response.releases) {
+		const release = expected.get(id)
+		if (release === undefined || seen.has(id)) {
+			throw new Error('Agent output contains an unknown or duplicate release id.')
 		}
 
-		return value
+		validateChanges(changes, release)
+		seen.add(id)
+	}
+
+	if (seen.size !== expected.size) {
+		throw new Error('Agent output omitted requested releases.')
+	}
+
+	return response.releases
+}
+
+function prompt({ releases, repositoryRoot }: GenerationRequest): string {
+	return `${instructions}\n\nInput data (JSON):\n${JSON.stringify({ releases, repositoryRoot })}`
+}
+
+async function runCodex(request: GenerationRequest): Promise<unknown> {
+	const { repositoryRoot, settings } = request
+	const directory = await mkdtemp(path.join(os.tmpdir(), 'chagent-agent-'))
+	try {
+		const schemaPath = path.join(directory, 'schema.json')
+		const outputPath = path.join(directory, 'response.json')
+		await writeFile(schemaPath, responseJsonSchema)
+		await runCommand(
+			'codex',
+			[
+				'exec',
+				'--skip-git-repo-check',
+				'--sandbox',
+				'read-only',
+				'--ephemeral',
+				'--ignore-user-config',
+				'--ignore-rules',
+				'--color',
+				'never',
+				'--json',
+				'--model',
+				settings.model ?? defaultModels.codex,
+				'--config',
+				`model_reasoning_effort=${JSON.stringify(settings.effort)}`,
+				'--config',
+				'features.shell_tool=true',
+				'--config',
+				'approval_policy="never"',
+				'--config',
+				'web_search="disabled"',
+				'--config',
+				'project_doc_max_bytes=0',
+				'--output-schema',
+				schemaPath,
+				'--output-last-message',
+				outputPath,
+				'-',
+			],
+			{
+				cwd: repositoryRoot,
+				input: prompt(request),
+				signal: settings.signal,
+				timeoutMs: settings.timeoutMs,
+			},
+		)
+		return JSON.parse(await readFile(outputPath, 'utf8'))
 	} finally {
 		await rm(directory, { force: true, recursive: true })
 	}
 }
 
+async function runClaude(request: GenerationRequest): Promise<unknown> {
+	const { repositoryRoot, settings } = request
+	const result = await runCommand(
+		'claude',
+		[
+			'--print',
+			'--output-format',
+			'json',
+			'--json-schema',
+			responseJsonSchema,
+			'--tools',
+			'Read,Glob,Grep,Bash',
+			'--safe-mode',
+			'--disable-slash-commands',
+			'--no-session-persistence',
+			'--setting-sources',
+			'',
+			'--strict-mcp-config',
+			'--mcp-config',
+			'{"mcpServers":{}}',
+			'--permission-mode',
+			'dontAsk',
+			'--model',
+			settings.model ?? defaultModels.claude,
+			'--effort',
+			settings.effort,
+		],
+		{
+			allowFailure: true,
+			cwd: repositoryRoot,
+			input: prompt(request),
+			signal: settings.signal,
+			timeoutMs: settings.timeoutMs,
+		},
+	)
+	if (result.stdout.trim() === '') {
+		throw new Error(`Claude generation failed: ${result.stderr.trim()}`)
+	}
+
+	const envelope = z.record(z.string(), z.unknown()).parse(JSON.parse(result.stdout))
+	if (envelope.is_error === true) {
+		throw new Error(
+			`Claude generation failed: ${typeof envelope.result === 'string' ? envelope.result : 'No structured result.'}`,
+		)
+	}
+
+	return envelope.structured_output
+}
+
+const runners: Record<AgentName, (request: GenerationRequest) => Promise<unknown>> = {
+	claude: runClaude,
+	codex: runCodex,
+}
+
 /** Create an adapter for an installed CLI using its existing authentication. */
 export function createAgent(name: AgentName): AgentAdapter {
 	return {
-		cacheKey: name === 'claude' ? 'claude-4' : 'codex-3',
+		cacheKey: `${name}:${defaultModels[name]}`,
 		async generate(request) {
-			const result = await invokeAgent(
-				name,
-				{ ...request, cwd: request.repository.root },
-				prompt(request),
-				responseSchema,
-			)
-			return validateChanges(result, request)
-		},
-		async generateHistory(request) {
-			const input = `${instructions}\n\n${historyInstructions}\n\nInput data (JSON):\n${JSON.stringify({ releases: request.releases, repositoryRoot: request.repositoryRoot })}`
-			const result = await invokeAgent(
-				name,
-				{ ...request, cwd: request.repositoryRoot },
-				input,
-				historyResponseSchema,
-			)
-			return validateHistory(result, request)
+			// Every adapter's response, including this one, is validated by the caller.
+			return (await runners[name](request)) as GenerationResponse
 		},
 		name,
 	}

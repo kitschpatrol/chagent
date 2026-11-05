@@ -8,7 +8,7 @@ import { generateChangelog } from '../src/lib/generate'
 import { git } from '../src/lib/process'
 import { previewChangelog } from '../src/lib/review'
 import { writeChangelog } from '../src/lib/write'
-import { commit, createRepository, writeFiles } from './helpers'
+import { commit, createRepository, describeReleases, writeFiles } from './helpers'
 
 function fixtureAgent(category: Category = 'Changed'): AgentAdapter & {
 	generate: ReturnType<typeof vi.fn<AgentAdapter['generate']>>
@@ -17,14 +17,7 @@ function fixtureAgent(category: Category = 'Changed'): AgentAdapter & {
 		cacheKey: 'fixture-1',
 		generate: vi.fn(async (request: GenerationRequest) => {
 			await Promise.resolve()
-			return [
-				{
-					breaking: false,
-					category,
-					description: `Improve ${request.packageName} in ${request.version}.`,
-					sources: [request.evidence[0]!.id],
-				},
-			]
+			return describeReleases(request, category)
 		}),
 		name: 'fixture',
 	}
@@ -52,8 +45,10 @@ describe('generation and writing', () => {
 			expect(
 				parseChangelog(plan.files[0]!.after).sections.map((section) => section.version),
 			).toEqual(['1.0.0'])
-			const initial = agent.generate.mock.calls[0]![0]
-			expect(initial.repository).toMatchObject({ directory: '.', root, to: plan.head })
+			const session = agent.generate.mock.calls[0]![0]
+			const initial = session.releases[0]!
+			expect(session.repositoryRoot).toBe(root)
+			expect(initial.repository).toMatchObject({ directory: '.', to: plan.head })
 			expect(initial.initialRelease).toBe(true)
 			expect(initial.evidence[0]?.kind).toBe('range')
 			await writeChangelog(plan)
@@ -102,7 +97,7 @@ describe('generation and writing', () => {
 		const agent = fixtureAgent()
 		const plan = await generateChangelog({ agent, cwd: root, github: false })
 		expect(plan.files).toHaveLength(1)
-		expect(agent.generate.mock.calls[0]?.[0]).toMatchObject({
+		expect(agent.generate.mock.calls[0]?.[0].releases[0]).toMatchObject({
 			initialRelease: true,
 			mode: 'initialize',
 			scope: 'package',
@@ -210,7 +205,7 @@ describe('generation and writing', () => {
 		await writeFiles(root, { 'index.js': 'export const answer = 44\n' })
 		await commit(root, 'Improve behavior.')
 		const plan = await generateChangelog({ agent, cwd: root, github: false })
-		expect(agent.generate.mock.calls.at(-1)?.[0]).toMatchObject({
+		expect(agent.generate.mock.calls.at(-1)?.[0].releases[0]).toMatchObject({
 			initialRelease: false,
 			mode: 'update',
 		})
@@ -288,7 +283,7 @@ describe('generation and writing', () => {
 		agent.cacheKey = undefined
 		await generateChangelog({ agent, cwd: root, github: false })
 		expect(agent.generate).toHaveBeenCalledOnce()
-		const request = agent.generate.mock.calls[0]![0]
+		const request = agent.generate.mock.calls[0]![0].releases[0]!
 		expect(request.version).toBe('Unreleased')
 		expect(request.existingEntries).toContain('Improve example in Unreleased.')
 		expect(request.repository.from).toBe(await git(root, ['rev-parse', 'v1.0.0']))
@@ -323,7 +318,21 @@ describe('generation and writing', () => {
 		})
 		const agent = fixtureAgent()
 		await generateChangelog({ agent, cwd: root, effort: undefined, model: 'chosen' })
-		expect(agent.generate.mock.calls[0]?.[0]).toMatchObject({ effort: 'low', model: 'chosen' })
+		expect(agent.generate.mock.calls[0]?.[0].settings).toMatchObject({
+			effort: 'low',
+			model: 'chosen',
+		})
+	})
+
+	it('reuses drafts when only the timeout changes, and regenerates when the effort changes', async () => {
+		const root = await createRepository()
+		const agent = fixtureAgent()
+		const options = { agent, cwd: root, github: false }
+		await generateChangelog({ ...options, timeoutMs: 1000 })
+		await generateChangelog({ ...options, timeoutMs: 2000 })
+		expect(agent.generate).toHaveBeenCalledOnce()
+		await generateChangelog({ ...options, effort: 'low', timeoutMs: 2000 })
+		expect(agent.generate).toHaveBeenCalledTimes(2)
 	})
 
 	it('rejects a symlink substituted for a changelog', async () => {
@@ -336,9 +345,17 @@ describe('generation and writing', () => {
 	it('rejects unsupported evidence citations before producing file edits', async () => {
 		const root = await createRepository()
 		const agent = fixtureAgent()
-		agent.generate.mockResolvedValue([
-			{ breaking: false, category: 'Added', description: 'Invented.', sources: ['missing'] },
-		])
+		agent.generate.mockImplementation(async (request) => {
+			await Promise.resolve()
+			return {
+				releases: request.releases.map(({ id }) => ({
+					changes: [
+						{ breaking: false, category: 'Added', description: 'Invented.', sources: ['missing'] },
+					],
+					id,
+				})),
+			}
+		})
 		await expect(generateChangelog({ agent, cwd: root, github: false })).rejects.toThrow(
 			'evidence that was not supplied',
 		)
@@ -398,14 +415,21 @@ describe('generation and writing', () => {
 		})
 		await git(root, ['tag', 'v1.0.0'])
 		const agent = fixtureAgent()
-		agent.generate.mockResolvedValue([])
+		agent.generate.mockImplementation(async (request) => {
+			await Promise.resolve()
+			return { releases: request.releases.map(({ id }) => ({ changes: [], id })) }
+		})
 		const plan = await generateChangelog({ agent, cwd: root, github: false })
 		expect(plan.files).toHaveLength(1)
 		expect(plan.files[0]?.after).toContain('packages/a/changelog.md#100---2026-01-01')
 		expect(plan.files[0]?.after).toContain('### Maintenance')
 		expect(plan.files[0]?.after).not.toContain('### Changed')
 		expect(await readFile(path.join(root, 'packages/a/changelog.md'), 'utf8')).toBe(history)
-		expect(agent.generate.mock.calls.some(([request]) => request.scope === 'repository')).toBe(true)
+		expect(
+			agent.generate.mock.calls.some(([request]) =>
+				request.releases.some((release) => release.scope === 'repository'),
+			),
+		).toBe(true)
 	})
 
 	it.each(['Changed', 'Documentation', 'Maintenance'] as const)(

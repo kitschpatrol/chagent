@@ -3,15 +3,14 @@ import type {
 	Change,
 	ChangelogPlan,
 	Evidence,
-	GenerationRequest,
-	HistoryRequest,
 	PackageInfo,
 	Release,
+	ReleaseRequest,
 	Repository,
 	ResolvedOptions,
 } from './types'
-import { validateChanges, validateHistory } from './agents'
-import { historyBatches, researchEvidence } from './batches'
+import { validateResponse } from './agents'
+import { releaseBatches } from './batches'
 import { readCache, writeCache } from './cache'
 import { collectEvidence, enrichWithGithub } from './evidence'
 import { instructionVersion } from './instructions'
@@ -27,7 +26,7 @@ export type GenerationContext = {
 
 export type GenerationJob = {
 	changes: Change[]
-	request: GenerationRequest
+	request: ReleaseRequest
 }
 
 /**
@@ -57,50 +56,48 @@ export async function prepareGeneration(
 	return {
 		changes: [],
 		request: {
-			effort: options.effort,
 			evidence,
 			existingEntries,
+			id: `${pkg.directory}@${release.version}`,
 			initialRelease: release.previousRef === undefined && from === undefined,
 			mode,
-			model: options.model,
 			packageName: pkg.name,
 			repository: {
 				directory: pkg.directory,
 				excludeDirectories,
 				from: from ?? release.previousRef,
-				root: repository.root,
 				to: release.ref,
 			},
 			scope: pkg.directory === '.' && repository.packages.length > 0 ? 'repository' : 'package',
-			signal: options.signal,
-			timeoutMs: options.timeoutMs,
 			version: release.version,
 		},
 	}
 }
 
-function cacheKey(context: GenerationContext, request: GenerationRequest): string {
+function cacheKey(context: GenerationContext, release: ReleaseRequest): string {
+	const { effort, maxInputChars, model } = context.options
 	return JSON.stringify({
-		...request,
-		agent: context.agent.cacheKey ?? context.agent.name,
+		agent: context.agent.cacheKey,
+		effort,
 		instructions: instructionVersion,
-		maxInputChars: context.options.maxInputChars,
-		signal: undefined,
+		maxInputChars,
+		model,
+		release,
 	})
 }
 
 async function cachedChanges(
 	context: GenerationContext,
-	request: GenerationRequest,
+	release: ReleaseRequest,
 ): Promise<Change[] | undefined> {
 	if (context.cacheDirectory === undefined) {
 		return undefined
 	}
 
-	const cached = await readCache(context.cacheDirectory, cacheKey(context, request))
+	const cached = await readCache(context.cacheDirectory, cacheKey(context, release))
 	if (cached !== undefined) {
 		try {
-			return validateChanges(cached, request)
+			return validateResponse({ releases: [cached] }, [release])[0]!.changes
 		} catch {
 			// A changed schema or corrupt cache must not block regeneration.
 		}
@@ -111,11 +108,14 @@ async function cachedChanges(
 
 async function saveChanges(
 	context: GenerationContext,
-	request: GenerationRequest,
+	release: ReleaseRequest,
 	changes: Change[],
 ): Promise<void> {
 	if (context.cacheDirectory !== undefined) {
-		await writeCache(context.cacheDirectory, cacheKey(context, request), { changes })
+		await writeCache(context.cacheDirectory, cacheKey(context, release), {
+			changes,
+			id: release.id,
+		})
 	}
 }
 
@@ -151,17 +151,13 @@ async function enrichJobs(context: GenerationContext, jobs: GenerationJob[]): Pr
 	}
 }
 
-async function generateOne(context: GenerationContext, job: GenerationJob): Promise<void> {
-	const { agent, options } = context
-	log.info(`Researching ${job.request.packageName} ${job.request.version}.`)
-	options.signal?.throwIfAborted()
-	const request = {
-		...job.request,
-		evidence: researchEvidence(job.request.evidence, options.maxInputChars),
+function progressMessage(pending: GenerationJob[], sessions: number): string {
+	const [only] = pending
+	if (only !== undefined && pending.length === 1) {
+		return `Researching ${only.request.packageName} ${only.request.version}.`
 	}
-	const changes = validateChanges({ changes: await agent.generate(request) }, request)
-	job.changes.push(...changes)
-	await saveChanges(context, job.request, job.changes)
+
+	return `Researching ${pending.length} release ranges in ${sessions} shared agent session${sessions === 1 ? '' : 's'}.`
 }
 
 /**
@@ -172,54 +168,48 @@ export async function generateJobs(
 	context: GenerationContext,
 	jobs: GenerationJob[],
 ): Promise<void> {
+	const { agent, options, repository } = context
 	const active = jobs.filter((job) => job.request.evidence.length > 0)
 	if (active.length === 0) {
 		return
 	}
 
 	await enrichJobs(context, active)
-	const pending: GenerationJob[] = []
+	const pending = new Map<string, GenerationJob>()
 	for (const job of active) {
 		const cached = await cachedChanges(context, job.request)
 		if (cached === undefined) {
-			pending.push(job)
+			pending.set(job.request.id, job)
 		} else {
 			job.changes.push(...cached)
 		}
 	}
 
-	if (context.agent.generateHistory === undefined || pending.length < 2) {
-		for (const job of pending) {
-			await generateOne(context, job)
-		}
-
+	if (pending.size === 0) {
 		return
 	}
 
-	const batches = historyBatches(
-		pending.map((job) => job.request),
-		context.options.maxInputChars,
+	const remaining = pending.values().toArray()
+	const batches = releaseBatches(
+		remaining.map((job) => job.request),
+		options.maxInputChars,
 	)
-	log.info(
-		`Researching ${pending.length} release ranges in ${batches.length} shared agent session${batches.length === 1 ? '' : 's'}.`,
-	)
+	log.info(progressMessage(remaining, batches.length))
 	for (const releases of batches) {
-		context.options.signal?.throwIfAborted()
-		const request: HistoryRequest = {
-			effort: context.options.effort,
-			model: context.options.model,
+		options.signal?.throwIfAborted()
+		const response = await agent.generate({
 			releases,
-			repositoryRoot: context.repository.root,
-			signal: context.options.signal,
-			timeoutMs: context.options.timeoutMs,
-		}
-		const results = validateHistory(
-			{ releases: await context.agent.generateHistory(request) },
-			request,
-		)
-		for (const result of results) {
-			const job = pending[Number(result.id)]!
-			job.changes.push(...result.changes)
+			repositoryRoot: repository.root,
+			settings: {
+				effort: options.effort,
+				model: options.model,
+				signal: options.signal,
+				timeoutMs: options.timeoutMs,
+			},
+		})
+		for (const { changes, id } of validateResponse(response, releases)) {
+			const job = pending.get(id)!
+			job.changes.push(...changes)
 			await saveChanges(context, job.request, job.changes)
 		}
 	}

@@ -1,24 +1,15 @@
-import type { Evidence, GenerationRequest, HistoryRelease } from './types'
+import type { Evidence, ReleaseRequest } from './types'
 
 /**
  * Keep release boundaries together, trimming optional seed evidence before
  * splitting history.
  */
-export function historyBatches(requests: GenerationRequest[], limit: number): HistoryRelease[][] {
-	const full = requests.map((request, index) => {
-		const {
-			effort: _effort,
-			model: _model,
-			signal: _signal,
-			timeoutMs: _timeout,
-			...input
-		} = request
-		return { ...input, id: String(index) }
-	})
-	const batches: HistoryRelease[][] = []
-	let batch: HistoryRelease[] = []
+export function releaseBatches(requests: ReleaseRequest[], limit: number): ReleaseRequest[][] {
+	const full = new Map(requests.map((request) => [request.id, request.evidence]))
+	const batches: ReleaseRequest[][] = []
+	let batch: ReleaseRequest[] = []
 	let size = 2
-	for (const release of full) {
+	for (const release of requests) {
 		const minimum = {
 			...release,
 			evidence: release.evidence.filter((item) => item.kind === 'range'),
@@ -45,7 +36,7 @@ export function historyBatches(requests: GenerationRequest[], limit: number): Hi
 			evidence: [
 				...item.evidence,
 				...researchEvidence(
-					full[Number(item.id)]!.evidence.filter((entry) => entry.kind !== 'range'),
+					full.get(item.id)!.filter((entry) => entry.kind !== 'range'),
 					allowance + 2,
 				),
 			],
@@ -54,7 +45,7 @@ export function historyBatches(requests: GenerationRequest[], limit: number): Hi
 		let remaining = limit - JSON.stringify(seeded).length
 		for (const item of seeded) {
 			const supplied = new Set(item.evidence.map((entry) => entry.id))
-			const optional = full[Number(item.id)]!.evidence.filter((entry) => !supplied.has(entry.id))
+			const optional = full.get(item.id)!.filter((entry) => !supplied.has(entry.id))
 			const before = JSON.stringify(item.evidence).length
 			item.evidence.push(...researchEvidence(optional, remaining + 2))
 			remaining -= JSON.stringify(item.evidence).length - before
@@ -64,16 +55,13 @@ export function historyBatches(requests: GenerationRequest[], limit: number): Hi
 	})
 }
 
-/**
- * Bound the starting context; research adapters can read the complete range
- * themselves.
- */
+/** Bound the starting context; adapters can read the complete range themselves. */
 export function researchEvidence(evidence: Evidence[], limit: number): Evidence[] {
 	const seed: Evidence[] = []
 	let size = 2
 	for (const item of evidence) {
 		const length = JSON.stringify(item).length + 1
-		if (!(size + length <= limit)) {
+		if (size + length > limit) {
 			continue
 		}
 

@@ -32,33 +32,17 @@ export type Evidence = {
 	text: string
 }
 
-export type HistoryRelease = Omit<
-	GenerationRequest,
-	'effort' | 'model' | 'signal' | 'timeoutMs'
-> & {
-	id: string
-}
-
-export type HistoryRequest = Pick<
-	GenerationRequest,
-	'effort' | 'model' | 'signal' | 'timeoutMs'
-> & {
-	releases: HistoryRelease[]
-	repositoryRoot: string
-}
-
-export type HistoryChangeSet = {
-	changes: Change[]
-	id: string
-}
-
-export type GenerationRequest = {
-	effort?: Effort
+/**
+ * One release to describe. This is plain data, so it serves as both prompt
+ * input and cache identity.
+ */
+export type ReleaseRequest = {
 	evidence: Evidence[]
 	existingEntries: string
-	initialRelease?: boolean
-	mode?: 'initialize' | 'update'
-	model?: string
+	/** Unique and stable across runs; each change set echoes it. */
+	id: string
+	initialRelease: boolean
+	mode: 'initialize' | 'update'
 	packageName: string
 	/**
 	 * Read-only research context in the local checkout; Git snapshots, not the
@@ -68,24 +52,44 @@ export type GenerationRequest = {
 		directory: string
 		excludeDirectories: string[]
 		from?: string
-		root: string
 		to: string
 	}
-	scope?: 'package' | 'repository'
+	scope: 'package' | 'repository'
+	version: string
+}
+
+/** How to run a session, as opposed to what it should describe. */
+export type RunSettings = {
+	effort: Effort
+	model?: string
 	signal?: AbortSignal
 	timeoutMs: number
-	version: string
+}
+
+/** One or more releases to research together in a single session. */
+export type GenerationRequest = {
+	releases: ReleaseRequest[]
+	repositoryRoot: string
+	settings: RunSettings
+}
+
+export type ChangeSet = {
+	changes: Change[]
+	id: string
+}
+
+export type GenerationResponse = {
+	releases: ChangeSet[]
 }
 
 export type AgentAdapter = {
 	/** Change this identifier when the adapter's generation behavior changes. */
 	cacheKey?: string
-	generate: (request: GenerationRequest) => Promise<Change[]>
 	/**
-	 * Research several release ranges together, sharing project context in one
-	 * session.
+	 * Describe every requested release, returning exactly one change set per
+	 * release ID.
 	 */
-	generateHistory?: (request: HistoryRequest) => Promise<HistoryChangeSet[]>
+	generate: (request: GenerationRequest) => Promise<GenerationResponse>
 	name: string
 }
 

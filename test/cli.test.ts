@@ -52,7 +52,7 @@ if (name === 'gh') {
   if (args.includes('graphql')) console.log(JSON.stringify({data: {repository: {}}}));
 } else {
   const input = JSON.parse(stdin.split('Input data (JSON):\n')[1]);
-  const result = {changes: [{category: 'Added', description: 'Provide the answer export.', breaking: false, sources: [input.evidence[0].id]}]};
+  const result = {releases: input.releases.map((release) => ({id: release.id, changes: [{category: 'Added', description: 'Provide the answer export.', breaking: false, sources: [release.evidence[0].id]}]}))};
   setTimeout(() => {
     if (name === 'codex') fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], JSON.stringify(result));
     else console.log(JSON.stringify({structured_output: result}));
@@ -191,7 +191,7 @@ describe('cli', () => {
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 const input = JSON.parse(fs.readFileSync(0, 'utf8').split('Input data (JSON):\n')[1]);
-fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], JSON.stringify({ changes: [{ category: 'Added', description: 'Provide the answer export.', breaking: false, sources: [input.evidence[0].id] }] }));
+fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], JSON.stringify({ releases: input.releases.map((release) => ({ id: release.id, changes: [{ category: 'Added', description: 'Provide the answer export.', breaking: false, sources: [release.evidence[0].id] }] })) }));
 console.log('Process chatter excluded from the output.');
 `,
 		)

@@ -1,7 +1,7 @@
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { GenerationRequest } from '../src/lib/types'
+import type { ReleaseRequest } from '../src/lib/types'
 import { createAgent } from '../src/lib/agents'
 import { runCommand } from '../src/lib/process'
 import { createRepository } from './helpers'
@@ -10,12 +10,15 @@ afterEach(() => {
 	vi.unstubAllEnvs()
 })
 
-const request: GenerationRequest = {
+const release: ReleaseRequest = {
 	evidence: [{ id: 'abc', kind: 'commit', text: 'Add a new export.' }],
 	existingEntries: '',
+	id: 'first',
+	initialRelease: false,
+	mode: 'update',
 	packageName: 'example',
-	repository: { directory: '.', excludeDirectories: [], root: '', to: 'HEAD' },
-	timeoutMs: 5000,
+	repository: { directory: '.', excludeDirectories: [], to: 'HEAD' },
+	scope: 'package',
 	version: '1.0.0',
 }
 
@@ -35,13 +38,13 @@ const fs = require('node:fs');
 const args = process.argv.slice(2);
 fs.writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(args));
 const input = JSON.parse(fs.readFileSync(0, 'utf8').split('Input data (JSON):\n')[1]);
-if (process.cwd() !== (input.repositoryRoot ?? input.repository.root)) process.exit(9);
+if (process.cwd() !== input.repositoryRoot) process.exit(9);
 const changes = (release) => [
   { category: 'Added', description: 'Support an additional export.', breaking: false, sources: [release.evidence[0].id] },
   { category: 'Documentation', description: 'Document the new export.', breaking: false, sources: [release.evidence[0].id] },
   { category: 'Maintenance', description: 'Refresh test tooling.', breaking: false, sources: [release.evidence[0].id] },
 ];
-const result = input.releases ? { releases: input.releases.map((release) => ({ id: release.id, changes: changes(release) })) } : { changes: changes(input) };
+const result = { releases: input.releases.map((release) => ({ id: release.id, changes: changes(release) })) };
 if (${JSON.stringify(name)} === 'codex') {
   fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], JSON.stringify(result));
   console.log('Unstructured process chatter that must never reach the changelog.');
@@ -58,16 +61,27 @@ if (${JSON.stringify(name)} === 'codex') {
 			}
 
 			vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH ?? ''}`)
-			const changes = await createAgent(name).generate({
-				...request,
-				repository: { directory: '.', excludeDirectories: [], root, to: 'HEAD' },
+			const { releases } = await createAgent(name).generate({
+				releases: [
+					release,
+					{
+						...release,
+						evidence: [{ id: 'def', kind: 'range', text: 'Inspect the next release.' }],
+						id: 'second',
+						version: '1.0.1',
+					},
+				],
+				repositoryRoot: root,
+				settings: { effort: 'xhigh', timeoutMs: 5000 },
 			})
-			expect(changes[0]?.description).toBe('Support an additional export.')
-			expect(changes.map((change) => change.category)).toEqual([
+			expect(releases.map(({ id }) => id)).toEqual(['first', 'second'])
+			expect(releases[0]?.changes[0]?.description).toBe('Support an additional export.')
+			expect(releases[0]?.changes.map((change) => change.category)).toEqual([
 				'Added',
 				'Documentation',
 				'Maintenance',
 			])
+			expect(releases.map(({ changes }) => changes[0]?.sources)).toEqual([['abc'], ['def']])
 			const args: unknown = JSON.parse(await readFile(argsFile, 'utf8'))
 			expect(args).not.toContain('--bare')
 			const expected =
@@ -91,31 +105,6 @@ if (${JSON.stringify(name)} === 'codex') {
 							'xhigh',
 						]
 			expect(args).toEqual(expect.arrayContaining(expected))
-			const history = await createAgent(name).generateHistory!({
-				releases: [
-					{
-						evidence: request.evidence,
-						existingEntries: '',
-						id: 'first',
-						packageName: 'example',
-						repository: { directory: '.', excludeDirectories: [], root, to: 'HEAD' },
-						version: '1.0.0',
-					},
-					{
-						evidence: [{ id: 'def', kind: 'range', text: 'Inspect the next release.' }],
-						existingEntries: '',
-						id: 'second',
-						packageName: 'example',
-						repository: { directory: '.', excludeDirectories: [], root, to: 'HEAD' },
-						version: '1.0.1',
-					},
-				],
-				repositoryRoot: root,
-				timeoutMs: 5000,
-			})
-			expect(history.map((release) => release.id)).toEqual(['first', 'second'])
-			expect(history.map((release) => release.changes[0]?.sources)).toEqual([['abc'], ['def']])
-			expect(JSON.parse(await readFile(argsFile, 'utf8'))).toEqual(expect.arrayContaining(expected))
 		},
 	)
 

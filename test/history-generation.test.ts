@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { GenerationContext, GenerationJob } from '../src/lib/generation'
-import type { AgentAdapter, Change, GenerationRequest, HistoryRequest } from '../src/lib/types'
+import type { AgentAdapter, GenerationRequest, ReleaseRequest } from '../src/lib/types'
 import { parseChangelog } from '../src/lib/changelog'
 import { defaults } from '../src/lib/defaults'
 import { generateChangelog } from '../src/lib/generate'
@@ -10,32 +10,17 @@ import { generateJobs } from '../src/lib/generation'
 import { git } from '../src/lib/process'
 import { inspectRepository } from '../src/lib/repository'
 import { writeChangelog } from '../src/lib/write'
-import { commit, createRepository, writeFiles } from './helpers'
-
-function change(request: Pick<GenerationRequest, 'evidence' | 'packageName' | 'version'>): Change {
-	return {
-		breaking: false,
-		category: 'Changed',
-		description: `Improve ${request.packageName} in ${request.version}.`,
-		sources: [request.evidence[0]!.id],
-	}
-}
+import { commit, createRepository, describeReleases, writeFiles } from './helpers'
 
 function fixtureAgent(): AgentAdapter & {
 	generate: ReturnType<typeof vi.fn<AgentAdapter['generate']>>
-	generateHistory: ReturnType<typeof vi.fn<NonNullable<AgentAdapter['generateHistory']>>>
 } {
 	return {
 		cacheKey: 'shared-history-fixture',
 		generate: vi.fn(async (request: GenerationRequest) => {
 			await Promise.resolve()
-			return [change(request)]
-		}),
-		generateHistory: vi.fn(async (request: HistoryRequest) => {
-			await Promise.resolve()
-			return request.releases
-				.toReversed()
-				.map((release) => ({ changes: [change(release)], id: release.id }))
+			const { releases } = describeReleases(request)
+			return { releases: releases.toReversed() }
 		}),
 		name: 'fixture',
 	}
@@ -54,9 +39,8 @@ describe('shared history generation', () => {
 		const agent = fixtureAgent()
 		const options = { agent, cwd: root, github: false }
 		const plan = await generateChangelog(options)
-		expect(agent.generate).not.toHaveBeenCalled()
-		expect(agent.generateHistory).toHaveBeenCalledOnce()
-		const request = agent.generateHistory.mock.calls[0]![0]
+		expect(agent.generate).toHaveBeenCalledOnce()
+		const request = agent.generate.mock.calls[0]![0]
 		expect(request.releases).toHaveLength(22)
 		expect(request.repositoryRoot).toBe(root)
 		expect(request.releases[0]).toMatchObject({
@@ -75,7 +59,7 @@ describe('shared history generation', () => {
 		await expect(readFile(path.join(root, 'changelog.md'))).rejects.toThrow()
 		const cached = await generateChangelog(options)
 		expect(cached.files).toEqual(plan.files)
-		expect(agent.generateHistory).toHaveBeenCalledOnce()
+		expect(agent.generate).toHaveBeenCalledOnce()
 		await writeChangelog(plan)
 		const repeated = await generateChangelog(options)
 		expect(repeated.files).toEqual([])
@@ -83,8 +67,8 @@ describe('shared history generation', () => {
 		await commit(root, 'Document installation.')
 		await git(root, ['tag', 'v1.0.22'])
 		const update = await generateChangelog(options)
-		expect(agent.generate).toHaveBeenCalledOnce()
-		expect(agent.generateHistory).toHaveBeenCalledOnce()
+		expect(agent.generate).toHaveBeenCalledTimes(2)
+		expect(agent.generate.mock.calls[1]![0].releases).toHaveLength(1)
 		expect(update.files[0]?.after).toContain(history.slice(history.indexOf('## ')))
 		expect(update.releases.map((release) => release.version)).toEqual(['1.0.22'])
 	}, 30_000)
@@ -110,9 +94,8 @@ describe('shared history generation', () => {
 			const agent = fixtureAgent()
 			const options = { agent, cwd: root, github: false, packages: ['projects/*'] }
 			const plan = await generateChangelog(options)
-			expect(agent.generate).not.toHaveBeenCalled()
-			expect(agent.generateHistory).toHaveBeenCalledOnce()
-			const request = agent.generateHistory.mock.calls[0]![0]
+			expect(agent.generate).toHaveBeenCalledOnce()
+			const request = agent.generate.mock.calls[0]![0]
 			expect(new Set(request.releases.map((release) => release.repository.directory))).toEqual(
 				new Set(['.', 'projects/client', 'projects/engine']),
 			)
@@ -129,7 +112,7 @@ describe('shared history generation', () => {
 			await writeChangelog(plan)
 			const repeated = await generateChangelog(options)
 			expect(repeated.files).toEqual([])
-			expect(agent.generateHistory).toHaveBeenCalledOnce()
+			expect(agent.generate).toHaveBeenCalledOnce()
 		},
 	)
 
@@ -142,12 +125,9 @@ describe('shared history generation', () => {
 			await commit(root, 'Improve the answer.')
 			await git(root, ['tag', 'v1.0.1'])
 			const agent = fixtureAgent()
-			agent.generateHistory.mockImplementationOnce(async (request) => {
+			agent.generate.mockImplementationOnce(async (request) => {
 				await Promise.resolve()
-				const results = request.releases.map((release) => ({
-					changes: [change(release)],
-					id: release.id,
-				}))
+				const { releases: results } = describeReleases(request)
 				switch (invalid) {
 					case 'cross-release': {
 						results[0]!.changes[0]!.sources = results[1]!.changes[0]!.sources
@@ -174,14 +154,14 @@ describe('shared history generation', () => {
 					}
 				}
 
-				return results
+				return { releases: results }
 			})
 			const options = { agent, cwd: root, github: false }
 			await expect(generateChangelog(options)).rejects.toThrow()
 			await expect(readFile(path.join(root, 'changelog.md'))).rejects.toThrow()
 			const retry = await generateChangelog(options)
-			expect(agent.generateHistory).toHaveBeenCalledTimes(2)
-			expect(agent.generateHistory.mock.calls[1]![0].releases).toHaveLength(2)
+			expect(agent.generate).toHaveBeenCalledTimes(2)
+			expect(agent.generate.mock.calls[1]![0].releases).toHaveLength(2)
 			expect(retry.files).toHaveLength(1)
 		},
 	)
@@ -190,8 +170,8 @@ describe('shared history generation', () => {
 		const root = await createRepository()
 		const repository = await inspectRepository(root)
 		const agent = fixtureAgent()
-		agent.generateHistory
-			.mockImplementationOnce(agent.generateHistory.getMockImplementation()!)
+		agent.generate
+			.mockImplementationOnce(agent.generate.getMockImplementation()!)
 			.mockRejectedValueOnce(new Error('Interrupted.'))
 		const context: GenerationContext = {
 			agent,
@@ -207,24 +187,25 @@ describe('shared history generation', () => {
 			},
 			repository,
 		}
-		const requests: GenerationRequest[] = Array.from({ length: 8 }, (_, index) => ({
+		const requests: ReleaseRequest[] = Array.from({ length: 8 }, (_, index) => ({
 			evidence: [{ id: `range:${index}`, kind: 'range', text: 'Read this release from Git.' }],
 			existingEntries: 'Keep this human entry. '.repeat(40),
+			id: `.@1.0.${index}`,
+			initialRelease: false,
+			mode: 'update',
 			packageName: 'example',
-			repository: { directory: '.', excludeDirectories: [], root, to: `release-${index}` },
-			timeoutMs: 5000,
+			repository: { directory: '.', excludeDirectories: [], to: `release-${index}` },
+			scope: 'package',
 			version: `1.0.${index}`,
 		}))
 		const jobs = (): GenerationJob[] => requests.map((request) => ({ changes: [], request }))
 		await expect(generateJobs(context, jobs())).rejects.toThrow('Interrupted.')
-		const completed = agent.generateHistory.mock.calls[0]![0].releases.map(
-			(release) => release.version,
-		)
+		const completed = agent.generate.mock.calls[0]![0].releases.map((release) => release.version)
 		expect(completed.length).toBeGreaterThan(1)
-		agent.generateHistory.mockClear()
+		agent.generate.mockClear()
 		const retried = jobs()
 		await generateJobs(context, retried)
-		const researched = agent.generateHistory.mock.calls.flatMap(([request]) =>
+		const researched = agent.generate.mock.calls.flatMap(([request]) =>
 			request.releases.map((release) => release.version),
 		)
 		expect(researched.toSorted()).toEqual(
@@ -234,6 +215,5 @@ describe('shared history generation', () => {
 				.toSorted(),
 		)
 		expect(retried.every((job) => job.changes.length === 1)).toBe(true)
-		expect(agent.generate).not.toHaveBeenCalled()
 	})
 })
