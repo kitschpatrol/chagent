@@ -135,30 +135,32 @@ try {
 					signal: controller.signal,
 					timeoutMs: supplied.timeout === undefined ? undefined : supplied.timeout * 1000,
 				})
-				if (args.dryRun) {
-					process.stdout.write(await previewChangelog(plan))
-					return
-				}
-
-				if (args.interactive) {
-					const reviewed = await reviewChangelog(plan, { editor: args.editor })
-					if (reviewed === undefined) {
-						process.stderr.write('Changelog review cancelled.\n')
-						process.exitCode = 1
+				try {
+					if (args.dryRun) {
+						process.stdout.write(await previewChangelog(plan))
 						return
 					}
 
-					plan = reviewed
-				}
+					if (args.interactive) {
+						const reviewed = await reviewChangelog(plan, { editor: args.editor })
+						if (reviewed === undefined) {
+							process.stderr.write('Changelog review cancelled.\n')
+							process.exitCode = 1
+							return
+						}
 
-				if (args.amend) {
-					await amendRelease(plan)
-				} else {
-					await writeChangelog(plan)
-				}
+						plan = reviewed
+					}
 
-				for (const diagnostic of plan.diagnostics) {
-					process.stderr.write(diagnostic + '\n')
+					if (args.amend) {
+						await amendRelease(plan)
+					} else {
+						await writeChangelog(plan)
+					}
+				} finally {
+					for (const diagnostic of plan.diagnostics) {
+						process.stderr.write(diagnostic + '\n')
+					}
 				}
 
 				process.stderr.write(

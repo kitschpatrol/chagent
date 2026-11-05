@@ -138,6 +138,20 @@ describe('cli', () => {
 		await expect(readFile(path.join(root, 'changelog.md'))).rejects.toThrow()
 	}, 15_000)
 
+	it('reports diagnostics during a dry run', async () => {
+		const root = await createRepository({ 'chagent.config.json': '{"cache":false}' })
+		await git(root, ['tag', 'v1.0.0'])
+		await git(root, ['remote', 'add', 'origin', 'https://github.com/example/fixture.git'])
+		await installCliFixtures(root)
+		await writeFile(
+			path.join(root, '.git', 'test-bin', process.platform === 'win32' ? 'gh.cjs' : 'gh'),
+			'#!/usr/bin/env node\nconsole.error("Not authenticated.");\nprocess.exit(1);\n',
+		)
+		const result = await runCommand(process.execPath, [cliPath, '--dry-run'], { cwd: root })
+		expect(result.stdout).toContain('Provide the answer export.')
+		expect(result.stderr).toContain('GitHub enrichment unavailable')
+	})
+
 	it('uses the configured timeout unless --timeout explicitly overrides it', async () => {
 		const root = await createRepository({
 			'chagent.config.json': '{"cache":false,"github":false,"timeoutMs":50}',
