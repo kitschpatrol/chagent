@@ -118,7 +118,7 @@ export async function collectEvidence(
 		release.previousRef === undefined ? release.ref : `${release.previousRef}..${release.ref}`
 	const emptyTree = await git(root, ['hash-object', '-t', 'tree', '--stdin'])
 	const from = release.previousRef ?? emptyTree
-	const awaitedResult1 = await git(root, [
+	const changedOutput = await git(root, [
 		'diff',
 		'--no-ext-diff',
 		'--no-textconv',
@@ -131,7 +131,7 @@ export async function collectEvidence(
 		...paths,
 	])
 	const changed: string[] = []
-	for (const file of awaitedResult1.split('\0')) {
+	for (const file of changedOutput.split('\0')) {
 		if (file === '' || ignored(file, repository.packages)) {
 			continue
 		}
@@ -151,10 +151,10 @@ export async function collectEvidence(
 	}
 
 	const evidence: Evidence[] = []
-	const awaitedResult2 = await git(root, ['log', '--format=%H', range, '--', ...paths])
-	const commits = awaitedResult2.split('\n').filter(Boolean)
+	const commitLog = await git(root, ['log', '--format=%H', range, '--', ...paths])
+	const commits = commitLog.split('\n').filter(Boolean)
 	for (const commit of commits) {
-		const awaitedResult3 = await git(root, [
+		const commitFiles = await git(root, [
 			'diff-tree',
 			'--root',
 			'-m',
@@ -166,7 +166,7 @@ export async function collectEvidence(
 			'--',
 			...paths,
 		])
-		const files = awaitedResult3
+		const files = commitFiles
 			.split('\0')
 			.filter((file) => file !== '' && !ignored(file, repository.packages))
 		if (

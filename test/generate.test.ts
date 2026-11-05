@@ -112,8 +112,8 @@ describe('generation and writing', () => {
 		await expect(readFile(path.join(root, 'changelog.md'))).rejects.toThrow()
 		await writeChangelog(plan)
 		const calls = agent.generate.mock.calls.length
-		const awaitedResult1 = await generateChangelog({ agent, cwd: root, github: false })
-		expect(awaitedResult1.files).toEqual([])
+		const repeated = await generateChangelog({ agent, cwd: root, github: false })
+		expect(repeated.files).toEqual([])
 		expect(agent.generate).toHaveBeenCalledTimes(calls)
 	})
 
@@ -332,12 +332,12 @@ describe('generation and writing', () => {
 			plan.files.find((file) => file.path === path.join(root, 'changelog.md'))?.after,
 		).toContain('packages/a/changelog.md#100--')
 		await writeChangelog(plan)
-		const awaitedResult2 = await generateChangelog({
+		const repeated = await generateChangelog({
 			agent: fixtureAgent(),
 			cwd: root,
 			github: false,
 		})
-		expect(awaitedResult2.files).toEqual([])
+		expect(repeated.files).toEqual([])
 	})
 
 	it('uses package-qualified root entries for independent versions', async () => {
@@ -353,12 +353,12 @@ describe('generation and writing', () => {
 		expect(rootFile.after).toContain('## @example/a@1.0.0 - ')
 		expect(rootFile.after).toContain('## @example/b@2.0.0 - ')
 		await writeChangelog(plan)
-		const awaitedResult3 = await generateChangelog({
+		const repeated = await generateChangelog({
 			agent: fixtureAgent(),
 			cwd: root,
 			github: false,
 		})
-		expect(awaitedResult3.files).toEqual([])
+		expect(repeated.files).toEqual([])
 	})
 
 	it('backfills root links without rewriting existing package history', async () => {

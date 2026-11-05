@@ -31,12 +31,12 @@ describe('release history', () => {
 		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
 		await commit(root, 'Fix the answer.')
 		let repository = await inspectRepository(root)
-		const awaitedResult1 = await resolveReleases(repository, repository.rootPackage, {})
-		expect(awaitedResult1.at(-1)?.version).toBe('Unreleased')
+		const unreleased = await resolveReleases(repository, repository.rootPackage, {})
+		expect(unreleased.at(-1)?.version).toBe('Unreleased')
 		await writeFiles(root, { 'package.json': '{"name":"example","version":"1.0.1"}' })
 		repository = await inspectRepository(root)
-		const awaitedResult2 = await resolveReleases(repository, repository.rootPackage, {})
-		expect(awaitedResult2.at(-1)).toMatchObject({
+		const bumped = await resolveReleases(repository, repository.rootPackage, {})
+		expect(bumped.at(-1)).toMatchObject({
 			pending: true,
 			version: '1.0.1',
 		})
@@ -70,8 +70,8 @@ describe('release history', () => {
 		await writeFiles(root, { 'CHANGELOG.md': '# Changelog\n\nInvented release descriptions.\n' })
 		await commit(root, 'Generate release notes.')
 		const repository = await inspectRepository(root)
-		const awaitedResult3 = await resolveReleases(repository, repository.rootPackage, {})
-		const release = awaitedResult3.at(-1)!
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		const release = releases.at(-1)!
 		expect(await collectEvidence(repository, repository.rootPackage, release)).toEqual([])
 	})
 
@@ -223,8 +223,8 @@ describe('release history', () => {
 		await git(root, ['tag', '@example/b@2.0.0'])
 		const repository = await inspectRepository(root)
 		expect(repository.packages.map((pkg) => pkg.name)).toEqual(['@example/a', '@example/b'])
-		const awaitedResult4 = await resolveReleases(repository, repository.packages[1]!, {})
-		expect(awaitedResult4.map((release) => release.version)).toEqual(['2.0.0'])
+		const releases = await resolveReleases(repository, repository.packages[1]!, {})
+		expect(releases.map((release) => release.version)).toEqual(['2.0.0'])
 	})
 
 	it('excludes version-only release commits from PR enrichment evidence', async () => {
