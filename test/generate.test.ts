@@ -1,6 +1,6 @@
-import { readFile, rm, symlink } from 'node:fs/promises'
+import { readFile, symlink } from 'node:fs/promises'
 import path from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AgentAdapter, Category, GenerationRequest } from '../src/lib/types'
 import { writeCache } from '../src/lib/cache'
 import { changelogHeader, parseChangelog } from '../src/lib/changelog'
@@ -9,13 +9,6 @@ import { git } from '../src/lib/process'
 import { previewChangelog } from '../src/lib/review'
 import { writeChangelog } from '../src/lib/write'
 import { commit, createRepository, writeFiles } from './helpers'
-
-const directories: string[] = []
-afterEach(async () => {
-	await Promise.all(
-		directories.splice(0).map(async (directory) => rm(directory, { force: true, recursive: true })),
-	)
-})
 
 function fixtureAgent(category: Category = 'Changed'): AgentAdapter & {
 	generate: ReturnType<typeof vi.fn<AgentAdapter['generate']>>
@@ -53,7 +46,6 @@ describe('generation and writing', () => {
 				},
 			}
 			const root = await createRepository(implementations[language], false)
-			directories.push(root)
 			await git(root, ['tag', 'v1.0.0'])
 			const agent = { ...fixtureAgent(), repositoryAccess: true }
 			const plan = await generateChangelog({ agent, cwd: root, github: false })
@@ -88,7 +80,6 @@ describe('generation and writing', () => {
 			},
 			false,
 		)
-		directories.push(root)
 		await git(root, ['tag', 'engine@1.0.0'])
 		await git(root, ['tag', 'client@2.0.0'])
 		const plan = await generateChangelog({
@@ -108,7 +99,6 @@ describe('generation and writing', () => {
 	})
 	it('creates history, previews without writing, and makes a repeated run a no-op', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		const agent = fixtureAgent()
 		const plan = await generateChangelog({ agent, cwd: root, github: false })
@@ -133,7 +123,6 @@ describe('generation and writing', () => {
 			'CHANGELOG.md':
 				changelogHeader + '\n## [Unreleased]\n\n### Added\n\n- A human note.\n\n' + history,
 		})
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		await writeFiles(root, { 'index.js': 'export const answer = 44\n' })
 		await commit(root, 'Fix the answer.')
@@ -149,7 +138,6 @@ describe('generation and writing', () => {
 
 	it('keeps incremental Unreleased updates idempotent and preserves saved edits', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		const agent = fixtureAgent()
 		await writeChangelog(await generateChangelog({ agent, cwd: root, github: false }))
@@ -188,7 +176,6 @@ describe('generation and writing', () => {
 			}
 
 			const root = await createRepository(files)
-			directories.push(root)
 			await git(root, ['tag', layout === 'independent' ? '@example/a@1.0.0' : 'v1.0.0'])
 			const agent = fixtureAgent()
 			const original = await generateChangelog({ agent, cwd: root, github: false })
@@ -209,7 +196,6 @@ describe('generation and writing', () => {
 
 	it('rejects concurrent changes before writing any file', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		const plan = await generateChangelog({ agent: fixtureAgent(), cwd: root, github: false })
 		await writeFiles(root, { 'changelog.md': 'Human work in progress.\n' })
 		await expect(writeChangelog(plan)).rejects.toThrow('changed during generation')
@@ -220,7 +206,6 @@ describe('generation and writing', () => {
 
 	it('rechecks Unreleased evidence after generation instructions change', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		const agent = fixtureAgent()
 		await writeChangelog(await generateChangelog({ agent, cwd: root, github: false }))
@@ -249,7 +234,6 @@ describe('generation and writing', () => {
 
 	it('rejects a symlink substituted for a changelog', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		const plan = await generateChangelog({ agent: fixtureAgent(), cwd: root, github: false })
 		await symlink(path.join(root, 'index.js'), path.join(root, 'changelog.md'))
 		await expect(writeChangelog(plan)).rejects.toThrow('not a regular file')
@@ -257,7 +241,6 @@ describe('generation and writing', () => {
 
 	it('rejects unsupported evidence citations before producing file edits', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		const agent = fixtureAgent()
 		agent.generate.mockResolvedValue([
 			{ breaking: false, category: 'Added', description: 'Invented.', sources: ['missing'] },
@@ -275,7 +258,6 @@ describe('generation and writing', () => {
 			'packages/b/package.json': '{"name":"@example/b","version":"1.0.0"}',
 			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
 		})
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		const plan = await generateChangelog({ agent: fixtureAgent(), cwd: root, github: false })
 		expect(plan.files).toHaveLength(3)
@@ -297,7 +279,6 @@ describe('generation and writing', () => {
 			'packages/b/package.json': '{"name":"@example/b","version":"2.0.0"}',
 			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
 		})
-		directories.push(root)
 		await git(root, ['tag', '@example/a@1.0.0'])
 		await git(root, ['tag', '@example/b@2.0.0'])
 		const plan = await generateChangelog({ agent: fixtureAgent(), cwd: root, github: false })
@@ -321,7 +302,6 @@ describe('generation and writing', () => {
 			'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',
 			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
 		})
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		const agent = fixtureAgent()
 		agent.generate.mockResolvedValue([])
@@ -342,7 +322,6 @@ describe('generation and writing', () => {
 				'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',
 				'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
 			})
-			directories.push(root)
 			await git(root, ['tag', '@example/a@1.0.0'])
 			const agent = fixtureAgent(category)
 			await writeChangelog(await generateChangelog({ agent, cwd: root, github: false }))

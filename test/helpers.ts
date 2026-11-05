@@ -1,14 +1,21 @@
-import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { onTestFinished } from 'vitest'
 import { git } from '../src/lib/process'
 
-/** Create an isolated Git repository with a committed initial version. */
+/**
+ * Create an isolated Git repository with a committed initial version, removed
+ * when the current test finishes.
+ */
 export async function createRepository(
 	files: Record<string, string> = {},
 	nodePackage = true,
 ): Promise<string> {
 	const temporary = await mkdtemp(path.join(os.tmpdir(), 'chagent-test-'))
+	onTestFinished(async () => {
+		await rm(temporary, { force: true, recursive: true })
+	})
 	const root = await realpath(temporary)
 	await git(root, ['init', '--initial-branch=main'])
 	await git(root, ['config', 'user.name', 'Changelog Test'])

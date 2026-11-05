@@ -1,4 +1,4 @@
-import { readFile, rm } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ChangelogPlan } from '../src/lib/types'
@@ -14,11 +14,10 @@ vi.mock('@clack/prompts', () => ({
 	select,
 }))
 
-const directories: string[] = []
 const inputDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
 const outputDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY')
 
-afterEach(async () => {
+afterEach(() => {
 	vi.restoreAllMocks()
 	select.mockReset()
 	for (const [stream, descriptor] of [
@@ -31,15 +30,10 @@ afterEach(async () => {
 			Object.defineProperty(stream, 'isTTY', descriptor)
 		}
 	}
-
-	await Promise.all(
-		directories.splice(0).map(async (directory) => rm(directory, { force: true, recursive: true })),
-	)
 })
 
 async function reviewPlan(): Promise<ChangelogPlan> {
 	const root = await createRepository()
-	directories.push(root)
 	Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true })
 	Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: true })
 	vi.spyOn(process.stdout, 'write').mockImplementation(() => true)

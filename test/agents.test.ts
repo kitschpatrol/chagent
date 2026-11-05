@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { GenerationRequest } from '../src/lib/types'
@@ -6,12 +6,8 @@ import { createAgent } from '../src/lib/agents'
 import { runCommand } from '../src/lib/process'
 import { createRepository } from './helpers'
 
-const directories: string[] = []
-afterEach(async () => {
+afterEach(() => {
 	vi.unstubAllEnvs()
-	await Promise.all(
-		directories.splice(0).map(async (directory) => rm(directory, { force: true, recursive: true })),
-	)
 })
 
 const request: GenerationRequest = {
@@ -27,7 +23,6 @@ describe('agent protocols', () => {
 		'uses %s structured output rather than process chatter',
 		async (name) => {
 			const root = await createRepository()
-			directories.push(root)
 			const bin = path.join(root, 'bin')
 			await mkdir(bin)
 			const file = path.join(bin, process.platform === 'win32' ? name + '.cjs' : name)

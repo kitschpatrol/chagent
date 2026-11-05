@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
@@ -7,12 +7,8 @@ import { changelogHeader } from '../src/lib/changelog'
 import { git, runCommand } from '../src/lib/process'
 import { createRepository } from './helpers'
 
-const directories: string[] = []
-afterEach(async () => {
+afterEach(() => {
 	vi.unstubAllEnvs()
-	await Promise.all(
-		directories.splice(0).map(async (directory) => rm(directory, { force: true, recursive: true })),
-	)
 })
 
 const cliPath = path.resolve(import.meta.dirname, '../dist/bin/cli.js')
@@ -111,7 +107,6 @@ describe('cli', () => {
 				model: 'configured-model',
 			}),
 		})
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		await git(root, ['remote', 'add', 'origin', 'https://github.com/example/fixture.git'])
 		await installCliFixtures(root)
@@ -147,7 +142,6 @@ describe('cli', () => {
 		const root = await createRepository({
 			'chagent.config.json': '{"cache":false,"github":false,"timeoutMs":50}',
 		})
-		directories.push(root)
 		await installCliFixtures(root, 250)
 		const configured = await runCommand(process.execPath, [cliPath, '--dry-run'], {
 			allowFailure: true,
@@ -173,7 +167,6 @@ describe('cli', () => {
 
 	it('runs without flags and writes a canonical changelog without committing', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		const head = await git(root, ['rev-parse', 'HEAD'])
 		const bin = path.join(root, '.git', 'test-bin')
 		await mkdir(bin)

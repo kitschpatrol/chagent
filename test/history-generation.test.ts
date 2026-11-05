@@ -1,6 +1,6 @@
-import { readFile, rm } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { GenerationContext, GenerationJob } from '../src/lib/generation'
 import type { AgentAdapter, Change, GenerationRequest, HistoryRequest } from '../src/lib/types'
 import { parseChangelog } from '../src/lib/changelog'
@@ -10,13 +10,6 @@ import { git } from '../src/lib/process'
 import { inspectRepository } from '../src/lib/repository'
 import { writeChangelog } from '../src/lib/write'
 import { commit, createRepository, writeFiles } from './helpers'
-
-const directories: string[] = []
-afterEach(async () => {
-	await Promise.all(
-		directories.splice(0).map(async (directory) => rm(directory, { force: true, recursive: true })),
-	)
-})
 
 function change(request: Pick<GenerationRequest, 'evidence' | 'packageName' | 'version'>): Change {
 	return {
@@ -51,7 +44,6 @@ function fixtureAgent(): AgentAdapter & {
 describe('shared history generation', () => {
 	it('researches 22 releases once, caches them separately, and preserves them on subsequent updates', async () => {
 		const root = await createRepository({ 'main.py': 'answer = 0\n' }, false)
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		for (let index = 1; index < 22; index += 1) {
 			await writeFiles(root, { 'main.py': `answer = ${index}\n` })
@@ -108,7 +100,6 @@ describe('shared history generation', () => {
 				},
 				false,
 			)
-			directories.push(root)
 			const tags = layout === 'shared' ? ['v1.0.0'] : ['client@1.0.0', 'engine@2.0.0']
 			for (const tag of tags) {
 				await git(root, ['tag', tag])
@@ -146,7 +137,6 @@ describe('shared history generation', () => {
 		'rejects %s release results before rendering or caching',
 		async (invalid) => {
 			const root = await createRepository({ 'main.py': 'answer = 42\n' }, false)
-			directories.push(root)
 			await git(root, ['tag', 'v1.0.0'])
 			await writeFiles(root, { 'main.py': 'answer = 43\n' })
 			await commit(root, 'Improve the answer.')
@@ -198,7 +188,6 @@ describe('shared history generation', () => {
 
 	it('reuses completed sessions after a later history session fails', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		const repository = await inspectRepository(root)
 		const agent = fixtureAgent()
 		agent.generateHistory

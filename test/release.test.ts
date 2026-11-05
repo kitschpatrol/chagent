@@ -1,7 +1,7 @@
 import { versionBump } from 'bumpp'
-import { readFile, rm } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { AgentAdapter } from '../src/lib/types'
 import { amendRelease } from '../src/lib/amend'
 import { createBumppHook } from '../src/lib/bumpp'
@@ -23,17 +23,9 @@ const agent: AgentAdapter = {
 	},
 	name: 'fixture',
 }
-const directories: string[] = []
-afterEach(async () => {
-	await Promise.all(
-		directories.splice(0).map(async (directory) => rm(directory, { force: true, recursive: true })),
-	)
-})
-
 describe('release integration', () => {
 	it('includes new changelogs in the bumpp commit and tag without consuming unrelated staged work', async () => {
 		const root = await createRepository({ 'unrelated.txt': 'original\n' })
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		await writeFiles(root, { 'index.js': 'export const answer = 44\n' })
 		await commit(root, 'Improve behavior.')
@@ -65,7 +57,6 @@ describe('release integration', () => {
 
 	it('stops bumpp before committing or tagging if generation fails', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		const head = await git(root, ['rev-parse', 'HEAD'])
 		const previous = process.cwd()
 		process.chdir(root)
@@ -102,7 +93,6 @@ describe('release integration', () => {
 
 	it('amends an unpublished bump and preserves tag annotation and unrelated staged changes', async () => {
 		const root = await createRepository({ 'unrelated.txt': 'original\n' })
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		await writeFiles(root, {
 			'package.json': '{"name":"example","version":"1.0.1","engines":{"node":">=18"}}',
@@ -122,7 +112,6 @@ describe('release integration', () => {
 
 	it('rejects ordinary commits even when amendment is explicitly requested', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		const plan = await generateChangelog({ agent, cwd: root, github: false })
 		await expect(amendRelease(plan)).rejects.toThrow('exactly one parent')
 		await expect(readFile(path.join(root, 'changelog.md'))).rejects.toThrow()
@@ -130,7 +119,6 @@ describe('release integration', () => {
 
 	it('refuses to rewrite a release already advertised by a remote', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		await writeFiles(root, {
 			'package.json': '{"name":"example","version":"1.0.1","engines":{"node":">=18"}}',

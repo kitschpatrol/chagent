@@ -1,21 +1,12 @@
-import { rm } from 'node:fs/promises'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { collectEvidence } from '../src/lib/evidence'
 import { git } from '../src/lib/process'
 import { hasNodeException, inspectRepository, resolveReleases } from '../src/lib/repository'
 import { commit, createRepository, writeFiles } from './helpers'
 
-const directories: string[] = []
-afterEach(async () => {
-	await Promise.all(
-		directories.splice(0).map(async (directory) => rm(directory, { force: true, recursive: true })),
-	)
-})
-
 describe('release history', () => {
 	it('includes the initial release and uses the predecessor of a tag at HEAD', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		await writeFiles(root, {
 			'index.js': 'export const answer = 43\n',
@@ -36,7 +27,6 @@ describe('release history', () => {
 
 	it('recognizes an uncommitted version bump and otherwise uses Unreleased', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
 		await commit(root, 'Fix the answer.')
@@ -58,7 +48,6 @@ describe('release history', () => {
 
 	it('does not treat Node upgrades in major releases as exceptions', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		await writeFiles(root, {
 			'package.json': '{"name":"example","version":"2.0.0","engines":{"node":">=20"}}',
@@ -77,7 +66,6 @@ describe('release history', () => {
 
 	it('excludes generated changelog commits from source evidence', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		await writeFiles(root, { 'CHANGELOG.md': '# Changelog\n\nInvented release descriptions.\n' })
 		await commit(root, 'Generate release notes.')
@@ -95,7 +83,6 @@ describe('release history', () => {
 				'{"name":"example","version":"1.0.0","exports":"./index.js","devDependencies":{"tool":"^1.0.0"}}',
 			'readme.md': 'Install with the old command.\n',
 		})
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		await writeFiles(root, {
 			'internal.js': 'export const publicMethod = () => 1\nconst helper = () => 2\n',
@@ -133,7 +120,6 @@ describe('release history', () => {
 		const root = await createRepository({
 			'package.json': '{"name":"docs-tooling","version":"0.0.0"}',
 		})
-		directories.push(root)
 		await git(root, ['tag', 'v2.0.0'])
 		const repository = await inspectRepository(root)
 		const releases = await resolveReleases(repository, repository.rootPackage, {})
@@ -142,7 +128,6 @@ describe('release history', () => {
 
 	it('includes lockfile-only maintenance without supplying the generated lockfile body', async () => {
 		const root = await createRepository({ 'pnpm-lock.yaml': 'lockfileVersion: 9\n' })
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		await writeFiles(root, {
 			'pnpm-lock.yaml': 'lockfileVersion: 9\n# generated-lockfile-sentinel\n',
@@ -162,7 +147,6 @@ describe('release history', () => {
 
 	it('keeps manifest and lockfile release bookkeeping out of an otherwise empty range', async () => {
 		const root = await createRepository({ 'package-lock.json': '{"version":"1.0.0"}' })
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		await writeFiles(root, {
 			'package-lock.json': '{"version":"1.0.1"}',
@@ -181,7 +165,6 @@ describe('release history', () => {
 			'packages/b/package.json': '{"name":"@example/b","version":"2.0.0"}',
 			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
 		})
-		directories.push(root)
 		await git(root, ['tag', '@example/a@1.0.0'])
 		await git(root, ['tag', '@example/b@2.0.0'])
 		const repository = await inspectRepository(root)
@@ -192,7 +175,6 @@ describe('release history', () => {
 
 	it('excludes version-only release commits from PR enrichment evidence', async () => {
 		const root = await createRepository()
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		await writeFiles(root, { 'index.js': 'export const answer = 45\n' })
 		await commit(root, 'Improve the answer.')
@@ -219,7 +201,6 @@ describe('release history', () => {
 			'packages/b/package.json': '{"name":"@example/b","version":"1.0.0"}',
 			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
 		})
-		directories.push(root)
 		await git(root, ['tag', 'v1.0.0'])
 		await writeFiles(root, {
 			'packages/a/package.json': '{"name":"@example/a","version":"2.0.0"}',
