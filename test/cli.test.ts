@@ -201,11 +201,14 @@ describe('cli', () => {
 		})
 		expect(first.stderr).not.toContain('Running:')
 		expect(first.stderr).not.toContain('Resolved options')
+		expect(first.stderr).toBe('Researching example Unreleased.\n')
 		const verbose = await runCommand(process.execPath, [cliPath, '--dry-run', '--verbose'], {
 			cwd: root,
 		})
 		expect(verbose.stdout).toContain('Provide the answer export.')
 		expect(verbose.stdout).not.toContain('Running:')
+		expect(verbose.stderr).not.toContain('\u{1B}[')
+		expect(verbose.stderr).not.toContain('[example]')
 		// The logger wraps long lines.
 		const details = verbose.stderr.replaceAll(WHITESPACE_RUN, ' ')
 		for (const detail of [

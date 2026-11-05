@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createLogger } from 'lognow'
 import path from 'node:path'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
@@ -51,15 +52,29 @@ function createReporter(verbose: boolean, signal: AbortSignal) {
 		console.error(...args)
 	}
 
-	setLogger({
-		...console,
-		debug: logDebug,
-		error: logProblem,
-		info: logDetail,
-		log: logDetail,
-		trace: logDebug,
-		warn: logProblem,
-	})
+	setLogger(
+		createLogger({
+			logToConsole: {
+				// eslint-disable-next-line unicorn/no-unnecessary-boolean-comparison -- Node types isTTY as a boolean, but it is undefined on a pipe, which would select lognow's colorized default.
+				colorize: process.stderr.isTTY === true,
+				getTerminalWidth: () =>
+					process.stderr.isTTY ? process.stderr.columns : Number.MAX_SAFE_INTEGER,
+				logger: {
+					debug: logDebug,
+					error: logProblem,
+					info: logDetail,
+					trace: logDebug,
+					warn: logProblem,
+				},
+				showLevel: verbose,
+				showName: false,
+				showTime: verbose,
+			},
+			name: 'chagent',
+			// Routing above decides which levels print.
+			verbose: true,
+		}),
+	)
 
 	return {
 		report(message: string) {
