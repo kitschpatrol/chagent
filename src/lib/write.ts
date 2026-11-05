@@ -2,6 +2,7 @@ import { lstat, mkdir, open, realpath, rename, rm, writeFile } from 'node:fs/pro
 import path from 'node:path'
 import type { ChangelogPlan, FileEdit } from './types'
 import { changelogHash, writeCache } from './cache'
+import { formatChangelogs } from './format'
 import { git } from './process'
 import { readOptional } from './repository'
 
@@ -73,12 +74,20 @@ export async function writeChangelog(plan: ChangelogPlan): Promise<string[]> {
 			applied.push(edit)
 		}
 
+		await formatChangelogs(
+			root,
+			applied.map((edit) => edit.path),
+			plan.diagnostics,
+		)
+
 		for (const checkpoint of plan.checkpoints) {
 			const edit = plan.files.find((file) => file.path === checkpoint.path)
 			try {
+				// Hash the file on disk, since formatting can change more than whitespace.
+				const written = edit === undefined ? undefined : await readOptional(edit.path)
 				await writeCache(path.join(stateDirectory, 'checkpoints'), checkpoint.path, {
 					...checkpoint,
-					contentHash: edit === undefined ? checkpoint.contentHash : changelogHash(edit.after),
+					contentHash: written === undefined ? checkpoint.contentHash : changelogHash(written),
 				})
 			} catch {
 				plan.diagnostics.push(

@@ -7,7 +7,7 @@ import { amendRelease } from '../src/lib/amend'
 import { createBumppHook } from '../src/lib/bumpp'
 import { generateChangelog } from '../src/lib/generate'
 import { git } from '../src/lib/process'
-import { commit, createRepository, writeFiles } from './helpers'
+import { commit, createRepository, installFormatter, writeFiles } from './helpers'
 
 const agent: AgentAdapter = {
 	async generate(request) {
@@ -69,6 +69,45 @@ describe('release integration', () => {
 		expect(await git(root, ['show', 'v1.0.1:changelog.md'])).toContain('Support examples.')
 		expect(await git(root, ['show', 'HEAD:unrelated.txt'])).toBe('original')
 		expect(await git(root, ['diff', '--cached', '--name-only'])).toBe('unrelated.txt')
+	})
+
+	it('commits the formatted changelog through bumpp', async () => {
+		const root = await createRepository({ '.gitignore': 'node_modules/\n' })
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'index.js': 'export const answer = 44\n' })
+		await commit(root, 'Improve behavior.')
+		await installFormatter(root, '@kitschpatrol/shared-config')
+		const previous = process.cwd()
+		process.chdir(root)
+		try {
+			await versionBump({
+				commit: 'Release: {version}',
+				confirm: false,
+				cwd: root,
+				execute: createBumppHook({ agent, editor: 'unused', github: false, interactive: false }),
+				ignoreScripts: true,
+				interface: false,
+				push: false,
+				release: '1.0.1',
+				tag: 'v{version}',
+			})
+		} finally {
+			process.chdir(previous)
+		}
+
+		expect(await git(root, ['show', 'v1.0.1:changelog.md'])).toContain('* Support examples.')
+		expect(await git(root, ['status', '--porcelain'])).toBe('')
+	})
+
+	it('amends with the formatted changelog', async () => {
+		const root = await createRepository({ '.gitignore': 'node_modules/\n' })
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'package.json': bumpedManifest })
+		await commit(root, 'Release: 1.0.1')
+		await installFormatter(root, '@kitschpatrol/shared-config')
+		await amendRelease(await generateChangelog({ agent, cwd: root, github: false }))
+		expect(await git(root, ['show', 'HEAD:changelog.md'])).toContain('* Support examples.')
+		expect(await git(root, ['status', '--porcelain'])).toBe('')
 	})
 
 	it('stops bumpp before committing or tagging if generation fails', async () => {

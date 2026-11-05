@@ -8,7 +8,7 @@ import { generateChangelog } from '../src/lib/generate'
 import { git } from '../src/lib/process'
 import { previewChangelog } from '../src/lib/review'
 import { writeChangelog } from '../src/lib/write'
-import { commit, createRepository, describeReleases, writeFiles } from './helpers'
+import { commit, createRepository, describeReleases, installFormatter, writeFiles } from './helpers'
 
 function fixtureAgent(category: Category = 'Changed'): AgentAdapter & {
 	generate: ReturnType<typeof vi.fn<AgentAdapter['generate']>>
@@ -241,6 +241,22 @@ describe('generation and writing', () => {
 		const request = agent.generate.mock.calls.at(-1)?.[0].releases[0]
 		expect(request?.repository.from).toBe(first.head)
 		expect(request?.evidence.filter(({ kind }) => kind === 'commit')).toHaveLength(1)
+	})
+
+	it('researches only newer commits after a formatter changes more than whitespace', async () => {
+		const root = await createRepository({ '.gitignore': 'node_modules/\n' })
+		await installFormatter(root, '@kitschpatrol/shared-config')
+		const agent = fixtureAgent()
+		const first = await generateChangelog({ agent, cwd: root, github: false })
+		await writeChangelog(first)
+		expect(await readFile(path.join(root, 'changelog.md'), 'utf8')).toContain(
+			'* Improve example in Unreleased.',
+		)
+		await writeFiles(root, { 'index.js': 'export const answer = 44\n' })
+		await commit(root, 'Improve behavior.')
+		await generateChangelog({ agent, cwd: root, github: false })
+		const request = agent.generate.mock.calls.at(-1)?.[0].releases[0]
+		expect(request?.repository.from).toBe(first.head)
 	})
 
 	it('rechecks the full history after changelog text changes', async () => {

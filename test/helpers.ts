@@ -50,6 +50,29 @@ export async function writeFiles(root: string, files: Record<string, string>): P
 	}
 }
 
+/**
+ * Install a local package whose fixFile records its calls and restyles list
+ * markers, or which runs the given module source instead.
+ */
+export async function installFormatter(root: string, name: string, source?: string): Promise<void> {
+	const calls = path.join(root, '.git', 'formatter-calls.jsonl')
+	await writeFiles(root, {
+		[`node_modules/${name}/dist/index.js`]:
+			source ??
+			String.raw`import fs from 'node:fs'
+export async function fixFile(file) {
+	fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ file, name: ${JSON.stringify(name)} }) + '\n')
+	fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replaceAll('\n- ', '\n* '))
+}
+`,
+		[`node_modules/${name}/package.json`]: JSON.stringify({
+			exports: { '.': { import: './dist/index.js' } },
+			name,
+			type: 'module',
+		}),
+	})
+}
+
 /** Commit all fixture changes. */
 export async function commit(root: string, message: string): Promise<void> {
 	await git(root, ['add', '--all'])
