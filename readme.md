@@ -15,6 +15,10 @@
 
 <!-- /short-description -->
 
+> [!WARNING]
+>
+> **This project is under development. It should not be considered suitable for general use until a 1.0 release.**
+
 ## Overview
 
 Run `chagent` in a Git repository to either create a changelog where none previously existed, or update an existing changelog to capture recent changes.
