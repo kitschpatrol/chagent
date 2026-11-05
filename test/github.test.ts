@@ -4,8 +4,10 @@ import type { GenerationJob } from '../src/lib/generation'
 import type * as processModule from '../src/lib/process'
 import type { AgentAdapter, Evidence, HistoryRequest, Repository } from '../src/lib/types'
 import { enrichWithGithub } from '../src/lib/evidence'
+import { generateChangelog } from '../src/lib/generate'
 import { generateJobs } from '../src/lib/generation'
-import { runCommand } from '../src/lib/process'
+import { git, runCommand } from '../src/lib/process'
+import { createRepository } from './helpers'
 
 vi.mock('../src/lib/process', async (importOriginal) => ({
 	...(await importOriginal<typeof processModule>()),
@@ -129,6 +131,33 @@ describe('batched GitHub enrichment', () => {
 			enrichWithGithub(repository, evidence, diagnostics, controller.signal),
 		).rejects.toThrow()
 		expect(runCommand).toHaveBeenCalledOnce()
+	})
+
+	it('skips PR lookups once release dates show GitHub is unavailable', async () => {
+		vi.mocked(runCommand).mockRejectedValue(new Error('GitHub is unavailable.'))
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		await git(root, ['remote', 'add', 'origin', 'https://github.com/owner/example.git'])
+		const plan = await generateChangelog({
+			agent: {
+				async generate(request) {
+					await Promise.resolve()
+					return [
+						{
+							breaking: false,
+							category: 'Added',
+							description: 'Add a feature.',
+							sources: [request.evidence[0]!.id],
+						},
+					]
+				},
+				name: 'fixture',
+			},
+			cwd: root,
+		})
+		expect(runCommand).toHaveBeenCalledOnce()
+		expect(plan.diagnostics).toHaveLength(1)
+		expect(plan.diagnostics[0]).toContain('using Git evidence')
 	})
 
 	it('deduplicates lookups across releases and scopes PR evidence to associated commits', async () => {

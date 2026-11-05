@@ -506,9 +506,9 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 		releases: [],
 		root,
 	}
-	if (resolved.github !== false) {
-		await enrichReleaseDates(repository, plan.diagnostics, resolved.signal)
-	}
+	const github =
+		resolved.github !== false &&
+		(await enrichReleaseDates(repository, plan.diagnostics, resolved.signal))
 
 	const context: Context = {
 		agent,
@@ -516,7 +516,7 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 			resolved.cache === false || agent.cacheKey === undefined
 				? undefined
 				: path.join(repository.gitDirectory, 'chagent', 'drafts'),
-		options: resolved,
+		options: { ...resolved, github },
 		plan,
 		repository,
 	}

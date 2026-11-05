@@ -209,17 +209,23 @@ export async function collectEvidence(
 	return evidence
 }
 
+function githubUnavailable(error: unknown): string {
+	return `GitHub enrichment unavailable; using Git evidence. ${error instanceof Error ? error.message : String(error)}`
+}
+
 /**
  * Read release dates only, keeping generated release bodies out of agent
  * inputs.
+ *
+ * @returns Whether GitHub could be reached, so later lookups can be skipped.
  */
 export async function enrichReleaseDates(
 	repository: Repository,
 	diagnostics: string[],
 	signal?: AbortSignal,
-): Promise<void> {
+): Promise<boolean> {
 	if (repository.github === undefined || repository.tags.length === 0) {
-		return
+		return true
 	}
 
 	try {
@@ -257,11 +263,12 @@ export async function enrichReleaseDates(
 				tag.date = new Date(value.published_at).toISOString().slice(0, 10)
 			}
 		}
+
+		return true
 	} catch (error) {
 		signal?.throwIfAborted()
-		diagnostics.push(
-			`GitHub enrichment unavailable; using Git evidence. ${error instanceof Error ? error.message : String(error)}`,
-		)
+		diagnostics.push(githubUnavailable(error))
+		return false
 	}
 }
 
@@ -375,10 +382,7 @@ export async function enrichWithGithub(
 		}
 	} catch (error) {
 		signal?.throwIfAborted()
-		const message = `GitHub enrichment unavailable; using Git evidence. ${error instanceof Error ? error.message : String(error)}`
-		if (diagnostics.every((item) => !item.startsWith('GitHub enrichment unavailable'))) {
-			diagnostics.push(message)
-		}
+		diagnostics.push(githubUnavailable(error))
 	}
 
 	return [...evidence, ...pulls.values()]

@@ -123,10 +123,7 @@ async function saveChanges(
 }
 
 async function enrichJobs(context: GenerationContext, jobs: GenerationJob[]): Promise<void> {
-	if (
-		context.options.github === false ||
-		context.plan.diagnostics.some((message) => message.startsWith('GitHub enrichment unavailable'))
-	) {
+	if (context.options.github === false) {
 		return
 	}
 
