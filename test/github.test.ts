@@ -180,7 +180,7 @@ describe('batched GitHub enrichment', () => {
 		await generateReleases(
 			{
 				agent,
-				options: { ...defaults, cache: false, rebuild: false },
+				options: { ...defaults, cache: false, rebuild: false, releaseDirectory: '.' },
 				plan: {
 					checkpoints: [],
 					diagnostics: [],

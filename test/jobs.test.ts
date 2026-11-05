@@ -215,7 +215,13 @@ describe('shared history generation', () => {
 		const context: GenerationContext = {
 			agent,
 			cacheDirectory: path.join(repository.gitDirectory, 'chagent', 'drafts'),
-			options: { ...defaults, github: false, maxInputChars: 4000, rebuild: false },
+			options: {
+				...defaults,
+				github: false,
+				maxInputChars: 4000,
+				rebuild: false,
+				releaseDirectory: '.',
+			},
 			plan: {
 				checkpoints: [],
 				diagnostics: [],

@@ -124,6 +124,8 @@ export type ResolvedOptions = Omit<ResolvedConfig, 'agent'> & {
 	onProgress?: (message: string) => void
 	rebuild: boolean
 	release?: ReleaseContext
+	/** Directory of the package the release context describes. */
+	releaseDirectory: string
 	signal?: AbortSignal
 }
 

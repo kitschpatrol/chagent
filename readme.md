@@ -234,7 +234,7 @@ Bumpp updates versions before invoking the callback. The callback generates and 
 
 Avoid putting changelogs in bumpp's version-replacement `files` option: it can replace version references in historical entries.
 
-With either approach, a generation error or cancelled review stops bumpp before its commit and tag. Bumpp's already updated version files remain available for correction or retry. The callback requires bumpp 12.3.0 or newer and works with recursive releases.
+With either approach, a generation error or cancelled review stops bumpp before its commit and tag. Bumpp's already updated version files remain available for correction or retry. The callback requires bumpp 12.3.0 or newer. It works with recursive releases, and with independently versioned packages released from their own directories.
 
 For an existing post-bump workflow, `chagent --amend` explicitly amends an unpublished version-only release commit and updates matching local tags. It checks current remote refs, preserves unrelated staged work and tag annotations, and refuses published releases, ambiguous commits, detached HEAD, and signed tags. Signed tags need manual re-signing; the pre-commit callback avoids that problem. Chagent itself never pushes or publishes.
 

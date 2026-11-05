@@ -561,6 +561,37 @@ describe('generation and writing', () => {
 		expect(repeated.files).toEqual([])
 	})
 
+	it('applies a release context from a package directory to that package only', async () => {
+		const root = await createRepository({
+			'packages/a/index.js': 'export const a = 1\n',
+			'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',
+			'packages/b/package.json': '{"name":"@example/b","version":"2.0.0"}',
+			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+		})
+		await git(root, ['tag', '@example/a@1.0.0'])
+		await git(root, ['tag', '@example/b@2.0.0'])
+		const agent = fixtureAgent()
+		await writeChangelog(await generateChangelog({ agent, cwd: root, github: false }))
+		await writeFiles(root, { 'packages/a/index.js': 'export const a = 2\n' })
+		await commit(root, 'Improve a.')
+		await writeFiles(root, { 'packages/a/package.json': '{"name":"@example/a","version":"1.0.1"}' })
+		const plan = await generateChangelog({
+			agent,
+			cwd: path.join(root, 'packages/a'),
+			github: false,
+			release: { tag: '@example/a@1.0.1', version: '1.0.1' },
+		})
+		const rootFile = plan.files.find((file) => file.path === path.join(root, 'changelog.md'))!
+		expect(parseChangelog(rootFile.after).sections.map((section) => section.version)).toEqual([
+			'@example/a@1.0.1',
+			'@example/b@2.0.0',
+			'@example/a@1.0.0',
+		])
+		expect(plan.releases.find((release) => release.version === '1.0.1')?.tag).toBe(
+			'@example/a@1.0.1',
+		)
+	})
+
 	it('backfills root links without rewriting existing package history', async () => {
 		const history =
 			changelogHeader + '\n## [1.0.0] - 2026-01-01\n\n### Added\n\n- Handwritten package history.\n'

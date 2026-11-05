@@ -15,8 +15,8 @@ import { generateWorkspace } from './workspace'
 
 /** Generate reviewable edits from Git history without changing tracked files. */
 export async function generateChangelog(options: GenerateOptions = {}): Promise<ChangelogPlan> {
-	const gitRoot = await git(options.cwd ?? process.cwd(), ['rev-parse', '--show-toplevel'])
-	const root = await realpath(gitRoot)
+	const cwd = options.cwd ?? process.cwd()
+	const root = await realpath(await git(cwd, ['rev-parse', '--show-toplevel']))
 	const {
 		agent: selected,
 		configFile,
@@ -46,6 +46,12 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 		root,
 	}
 	const github = config.github && (await enrichReleaseDates(repository, plan.diagnostics, signal))
+	// Like bumpp, a release context describes the package being released from cwd.
+	const location = path.relative(root, await realpath(cwd)).split(path.sep).join('/')
+	const releaseDirectory =
+		repository.packages.findLast(
+			({ directory }) => location === directory || location.startsWith(`${directory}/`),
+		)?.directory ?? '.'
 
 	const context: Context = {
 		agent,
@@ -53,7 +59,7 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 			config.cache && agent.cacheKey !== undefined
 				? path.join(repository.gitDirectory, 'chagent', 'drafts')
 				: undefined,
-		options: { ...config, github, onProgress, rebuild, release, signal },
+		options: { ...config, github, onProgress, rebuild, release, releaseDirectory, signal },
 		plan,
 		repository,
 	}

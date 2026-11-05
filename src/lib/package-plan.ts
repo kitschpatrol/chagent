@@ -2,7 +2,15 @@ import path from 'node:path'
 import semver from 'semver'
 import { z } from 'zod'
 import type { GenerationContext as Context } from './jobs'
-import type { Change, PackageInfo, Release, ReleaseRequest, ReleaseSummary } from './types'
+import type {
+	Change,
+	PackageInfo,
+	Release,
+	ReleaseContext,
+	ReleaseRequest,
+	ReleaseSummary,
+	ResolvedOptions,
+} from './types'
 import { changelogHash, readCache } from './cache'
 import { findChangelog, parseChangelog, updateMarkdown } from './changelog'
 import { instructionVersion } from './instructions'
@@ -119,6 +127,14 @@ export function missingReleases(releases: Release[], content = ''): Release[] {
 	)
 }
 
+/** Apply an explicit release context only to the package being released. */
+export function releaseContext(
+	options: ResolvedOptions,
+	pkg: PackageInfo,
+): ReleaseContext | undefined {
+	return pkg.directory === options.releaseDirectory ? options.release : undefined
+}
+
 /** Resolve a package's releases and prepare requests for those it still needs. */
 export async function preparePackage(
 	context: Context,
@@ -130,7 +146,12 @@ export async function preparePackage(
 	const file = await findChangelog(path.join(repository.root, pkg.directory))
 	const content = context.options.rebuild ? undefined : file.content
 	const mode = content === undefined ? 'initialize' : 'update'
-	const releases = await resolveReleases(repository, pkg, context.options, context.options.release)
+	const releases = await resolveReleases(
+		repository,
+		pkg,
+		context.options,
+		releaseContext(context.options, pkg),
+	)
 	const missing = missingReleases(releases, content)
 	log.debug(
 		`${pkg.name}: ${releases.length} releases, missing [${missing.map((release) => release.version).join(', ')}], changelog ${file.path}.`,

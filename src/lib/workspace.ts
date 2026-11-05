@@ -10,6 +10,7 @@ import {
 	missingReleases,
 	preparePackage,
 	recordCheckpoint,
+	releaseContext,
 	renderPackage,
 } from './package-plan'
 import { git } from './process'
@@ -227,7 +228,7 @@ export async function generateWorkspace(context: Context): Promise<void> {
 		repository,
 		repository.rootPackage,
 		options,
-		options.release,
+		releaseContext(options, repository.rootPackage),
 	)
 	const shared = rootReleases.some((release) => release.version !== 'Unreleased')
 	const rootFile = await findChangelog(repository.root)
