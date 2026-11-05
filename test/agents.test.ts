@@ -23,6 +23,33 @@ const release: ReleaseRequest = {
 	version: '1.0.0',
 }
 
+/**
+ * Put a fake agent CLI on the PATH of a new repository. The source runs after
+ * stdin is read, with `fs` and `args` in scope.
+ */
+async function installAgent(name: 'claude' | 'codex', source: string): Promise<string> {
+	const root = await createRepository()
+	const bin = path.join(root, 'bin')
+	await mkdir(bin)
+	const file = path.join(bin, process.platform === 'win32' ? name + '.cjs' : name)
+	await writeFile(
+		file,
+		`#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.readFileSync(0);
+${source}
+`,
+	)
+	await chmod(file, 0o755)
+	if (process.platform === 'win32') {
+		await writeFile(path.join(bin, name + '.cmd'), `@node "%~dp0${name}.cjs" %*\r\n`)
+	}
+
+	vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH ?? ''}`)
+	return root
+}
+
 describe('agent protocols', () => {
 	it.each(['codex', 'claude'] as const)(
 		'uses %s structured output rather than process chatter',
@@ -124,26 +151,11 @@ if (${JSON.stringify(name)} === 'codex') {
 	)
 
 	it('survives a Codex session whose event stream exceeds the output limit', async () => {
-		const root = await createRepository()
-		const bin = path.join(root, 'bin')
-		await mkdir(bin)
-		const file = path.join(bin, process.platform === 'win32' ? 'codex.cjs' : 'codex')
-		await writeFile(
-			file,
-			`#!/usr/bin/env node
-const fs = require('node:fs');
-const args = process.argv.slice(2);
-fs.readFileSync(0);
-fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], '{"releases":[]}');
-fs.writeSync(1, 'event'.repeat(7_000_000));
-`,
+		const root = await installAgent(
+			'codex',
+			`fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], '{"releases":[]}');
+fs.writeSync(1, 'event'.repeat(7_000_000));`,
 		)
-		await chmod(file, 0o755)
-		if (process.platform === 'win32') {
-			await writeFile(path.join(bin, 'codex.cmd'), '@node "%~dp0codex.cjs" %*\r\n')
-		}
-
-		vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH ?? ''}`)
 		await expect(
 			createAgent('codex').generate({
 				releases: [release],
@@ -152,6 +164,34 @@ fs.writeSync(1, 'event'.repeat(7_000_000));
 			}),
 		).resolves.toEqual({ releases: [] })
 	}, 40_000)
+
+	it('passes a non-JSON Codex response on for validation to request a correction', async () => {
+		const root = await installAgent(
+			'codex',
+			"fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], 'Here are the notes.');",
+		)
+		await expect(
+			createAgent('codex').generate({
+				releases: [release],
+				repositoryRoot: root,
+				settings: { effort: 'low', timeoutMs: 5000 },
+			}),
+		).resolves.toBe('Here are the notes.')
+	})
+
+	it.each([
+		['codex', '', 'Codex exited without writing a final response.'],
+		['claude', "console.log('Not a result.');", 'Claude returned output without a JSON result'],
+	] as const)('explains a %s session without a usable result', async (name, source, message) => {
+		const root = await installAgent(name, source)
+		await expect(
+			createAgent(name).generate({
+				releases: [release],
+				repositoryRoot: root,
+				settings: { effort: 'low', timeoutMs: 5000 },
+			}),
+		).rejects.toThrow(message)
+	})
 
 	it('fails a subprocess that exceeds the output limit unless asked to keep only the tail', async () => {
 		const script = "process.stdout.write('x'.repeat(33_000_000) + 'end')"

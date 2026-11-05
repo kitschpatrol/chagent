@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { z } from 'zod'
@@ -14,6 +14,7 @@ import type {
 import { defaultModels } from './defaults'
 import { instructions } from './instructions'
 import { runCommand } from './process'
+import { readOptional } from './repository'
 import { categories } from './types'
 
 const CONTROL_CHARACTERS = /\p{Cc}/v
@@ -161,9 +162,26 @@ async function runCodex(request: GenerationRequest): Promise<unknown> {
 				timeoutMs: settings.timeoutMs,
 			},
 		)
-		return JSON.parse(await readFile(outputPath, 'utf8'))
+		const output = await readOptional(outputPath)
+		if (output === undefined) {
+			throw new Error('Codex exited without writing a final response.')
+		}
+
+		return parseResponse(output)
 	} finally {
 		await rm(directory, { force: true, recursive: true })
+	}
+}
+
+/**
+ * Parse a final message. Text that is not JSON is returned as is, so validation
+ * rejects it and the session gets its correction request.
+ */
+function parseResponse(text: string): unknown {
+	try {
+		return JSON.parse(text)
+	} catch {
+		return text
 	}
 }
 
@@ -206,7 +224,14 @@ async function runClaude(request: GenerationRequest): Promise<unknown> {
 		throw new Error(`Claude generation failed: ${result.stderr.trim()}`)
 	}
 
-	const envelope = z.record(z.string(), z.unknown()).parse(JSON.parse(result.stdout))
+	const parsed = z.record(z.string(), z.unknown()).safeParse(parseResponse(result.stdout))
+	if (!parsed.success) {
+		throw new Error(
+			`Claude returned output without a JSON result: ${result.stdout.trim().slice(-500)}`,
+		)
+	}
+
+	const envelope = parsed.data
 	if (envelope.is_error === true) {
 		throw new Error(
 			`Claude generation failed: ${typeof envelope.result === 'string' ? envelope.result : 'No structured result.'}`,
