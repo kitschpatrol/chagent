@@ -84,6 +84,8 @@ npm install @kitschpatrol/chagent
 
 Use `--model` and `--effort` to override the selected agent's defaults.
 
+Explicit CLI flags override repository configuration, which overrides built-in defaults. The defaults shown in `--help` apply when no repository override is configured; the model default depends on the selected agent.
+
 Interactive review edits temporary candidate files. After the editor exits, the updated diff is displayed. Accepting writes exactly the saved content. Cancelling leaves repository files unchanged. Editor selection follows `git var GIT_EDITOR`, or `--editor`; GUI editor commands must wait, for example `code --wait`.
 
 The default command writes changelog files without staging or committing them.
@@ -104,23 +106,23 @@ Usage:
 chagent
 ```
 
-| Option                  | Description                                                               | Type                                          | Default |
-| ----------------------- | ------------------------------------------------------------------------- | --------------------------------------------- | ------- |
-| `--cwd`                 | Repository directory                                                      | `string`                                      |         |
-| `--agent`               | Installed agent CLI (default: codex)                                      | `"codex"` `"claude"`                          |         |
-| `--model`               | Agent model (Codex default: gpt-6.1-sol; Claude default: claude-opus-5-5) | `string`                                      |         |
-| `--effort`              | Reasoning effort (default: xhigh)                                         | `"low"` `"medium"` `"high"` `"xhigh"` `"max"` |         |
-| `--interactive`<br>`-i` | Review a diff and optionally edit before writing                          | `boolean`                                     | `false` |
-| `--editor`              | Editor command for interactive review; configure GUI editors to wait      | `string`                                      |         |
-| `--dry-run`             | Print a diff without applying changes                                     | `boolean`                                     | `false` |
-| `--rebuild`             | Reconstruct all history, replacing existing release text                  | `boolean`                                     | `false` |
-| `--amend`               | Amend a verified unpublished release commit and matching local tags       | `boolean`                                     | `false` |
-| `--github`              | Enrich Git evidence using gh when available; disable with --no-github     | `boolean`                                     |         |
-| `--cache`               | Cache drafts and incremental state; disable with --no-cache               | `boolean`                                     |         |
-| `--config`              | Configuration file path                                                   | `string`                                      |         |
-| `--timeout`             | Agent timeout in seconds (default: 1200)                                  | `number`                                      |         |
-| `--help`<br>`-h`        | Show help                                                                 | `boolean`                                     |         |
-| `--version`<br>`-v`     | Show version number                                                       | `boolean`                                     |         |
+| Option                  | Description                                                           | Type                                          | Default                                       |
+| ----------------------- | --------------------------------------------------------------------- | --------------------------------------------- | --------------------------------------------- |
+| `--cwd`                 | Repository directory                                                  | `string`                                      | current directory                             |
+| `--agent`               | Installed agent CLI                                                   | `"codex"` `"claude"`                          | `"codex"`                                     |
+| `--model`               | Agent model                                                           | `string`                                      | gpt-6.1-sol (Codex); claude-opus-5-5 (Claude) |
+| `--effort`              | Reasoning effort                                                      | `"low"` `"medium"` `"high"` `"xhigh"` `"max"` | `"xhigh"`                                     |
+| `--interactive`<br>`-i` | Review a diff and optionally edit before writing                      | `boolean`                                     | `false`                                       |
+| `--editor`              | Editor command for interactive review; configure GUI editors to wait  | `string`                                      | git var GIT_EDITOR                            |
+| `--dry-run`             | Print a diff without applying changes                                 | `boolean`                                     | `false`                                       |
+| `--rebuild`             | Reconstruct all history, replacing existing release text              | `boolean`                                     | `false`                                       |
+| `--amend`               | Amend a verified unpublished release commit and matching local tags   | `boolean`                                     | `false`                                       |
+| `--github`              | Enrich Git evidence using gh when available; disable with --no-github | `boolean`                                     | `true`                                        |
+| `--cache`               | Cache drafts and incremental state; disable with --no-cache           | `boolean`                                     | `true`                                        |
+| `--config`              | Configuration file path                                               | `string`                                      | auto-detected from repository root            |
+| `--timeout`             | Agent timeout in seconds                                              | `number`                                      | `1200`                                        |
+| `--help`<br>`-h`        | Show help                                                             | `boolean`                                     |                                               |
+| `--version`<br>`-v`     | Show version number                                                   | `boolean`                                     |                                               |
 
 <!-- /cli-help -->
 

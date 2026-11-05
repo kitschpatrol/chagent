@@ -17,6 +17,7 @@ import { createAgent } from './agents'
 import { hash, readCache } from './cache'
 import { findChangelog, parseChangelog, updateMarkdown } from './changelog'
 import { loadConfig } from './config'
+import { defaultAgent, defaultTimeoutMs } from './defaults'
 import { enrichReleaseDates } from './evidence'
 import { generateJobs, prepareGeneration } from './generation'
 import { instructionVersion } from './instructions'
@@ -497,7 +498,9 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 
 	const repository = await inspectRepository(root, resolved)
 	const agent =
-		typeof resolved.agent === 'object' ? resolved.agent : createAgent(resolved.agent ?? 'codex')
+		typeof resolved.agent === 'object'
+			? resolved.agent
+			: createAgent(resolved.agent ?? defaultAgent)
 	const plan: ChangelogPlan = {
 		checkpoints: [],
 		diagnostics: [],
@@ -543,7 +546,10 @@ function validateLimits(resolved: GenerateOptions): void {
 		throw new Error('maxInputChars must be a finite number of at least 4000.')
 	}
 
-	if ((resolved.timeoutMs ?? 1_200_000) <= 0 || !Number.isFinite(resolved.timeoutMs ?? 1_200_000)) {
+	if (
+		(resolved.timeoutMs ?? defaultTimeoutMs) <= 0 ||
+		!Number.isFinite(resolved.timeoutMs ?? defaultTimeoutMs)
+	) {
 		throw new Error('timeoutMs must be a positive finite number.')
 	}
 }

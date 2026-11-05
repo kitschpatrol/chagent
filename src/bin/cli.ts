@@ -13,6 +13,7 @@ import {
 	setLogger,
 	writeChangelog,
 } from '../lib'
+import { defaultAgent, defaultEffort, defaultModels, defaultTimeoutMs } from '../lib/defaults'
 
 setLogger({ ...console, debug: console.error, info: console.error, log: console.error })
 const controller = new AbortController()
@@ -24,6 +25,17 @@ process.once('SIGTERM', () => {
 })
 
 const cli = yargs(hideBin(process.argv))
+
+function explicitArguments<T extends Record<string, unknown>>(args: T): Partial<T> {
+	const { parsed } = cli
+	const defaults = parsed !== false && 'defaulted' in parsed ? parsed.defaulted : undefined
+	const keys = new Set(
+		typeof defaults === 'object' && defaults !== null ? Object.keys(defaults) : [],
+	)
+	// Values explicitly supplied by the user remain overrides even when they equal a default.
+	return Object.fromEntries(Object.entries(args).filter(([key]) => !keys.has(key))) as Partial<T>
+}
+
 try {
 	await cli
 		.scriptName('chagent')
@@ -32,19 +44,28 @@ try {
 			'Initialize or update changelogs from repository history.',
 			(command) =>
 				command
-					.option('cwd', { description: 'Repository directory', type: 'string' })
+					.option('cwd', {
+						default: process.cwd(),
+						defaultDescription: 'current directory',
+						description: 'Repository directory',
+						type: 'string',
+					})
 					.option('agent', {
 						choices: ['codex', 'claude'],
-						description: 'Installed agent CLI (default: codex)',
+						default: defaultAgent,
+						description: 'Installed agent CLI',
+						type: 'string',
 					})
 					.option('model', {
-						description:
-							'Agent model (Codex default: gpt-6.1-sol; Claude default: claude-opus-5-5)',
+						defaultDescription: `${defaultModels.codex} (Codex); ${defaultModels.claude} (Claude)`,
+						description: 'Agent model',
 						type: 'string',
 					})
 					.option('effort', {
 						choices: ['low', 'medium', 'high', 'xhigh', 'max'],
-						description: 'Reasoning effort (default: xhigh)',
+						default: defaultEffort,
+						description: 'Reasoning effort',
+						type: 'string',
 					})
 					.option('interactive', {
 						alias: 'i',
@@ -53,6 +74,7 @@ try {
 						type: 'boolean',
 					})
 					.option('editor', {
+						defaultDescription: 'git var GIT_EDITOR',
 						description: 'Editor command for interactive review; configure GUI editors to wait',
 						type: 'string',
 					})
@@ -72,40 +94,46 @@ try {
 						type: 'boolean',
 					})
 					.option('github', {
+						default: true,
 						description: 'Enrich Git evidence using gh when available; disable with --no-github',
 						type: 'boolean',
 					})
 					.option('cache', {
+						default: true,
 						description: 'Cache drafts and incremental state; disable with --no-cache',
 						type: 'boolean',
 					})
-					.option('config', { description: 'Configuration file path', type: 'string' })
+					.option('config', {
+						defaultDescription: 'auto-detected from repository root',
+						description: 'Configuration file path',
+						type: 'string',
+					})
 					.option('timeout', {
-						description: 'Agent timeout in seconds (default: 1200)',
+						default: defaultTimeoutMs / 1000,
+						description: 'Agent timeout in seconds',
 						type: 'number',
 					})
 					.check((args) => {
-						if (
-							args.timeout !== undefined &&
-							(!Number.isFinite(args.timeout) || args.timeout <= 0)
-						) {
+						if (!Number.isFinite(args.timeout) || args.timeout <= 0) {
 							throw new Error('--timeout must be a positive number of seconds.')
 						}
 
 						return true
 					}),
 			async (args) => {
+				// Only explicit flags override repository configuration; the library applies shared defaults.
+				const supplied = explicitArguments(args)
 				let plan = await generateChangelog({
-					agent: args.agent as AgentName | undefined,
-					cache: args.cache,
-					configFile: args.config,
+					agent: supplied.agent as AgentName | undefined,
+					cache: supplied.cache,
+					configFile: supplied.config,
 					cwd: args.cwd,
-					effort: args.effort as Effort | undefined,
-					github: args.github,
-					model: args.model,
+					effort: supplied.effort as Effort | undefined,
+					github: supplied.github,
+					model: supplied.model,
 					rebuild: args.rebuild,
 					signal: controller.signal,
-					timeoutMs: args.timeout === undefined ? undefined : args.timeout * 1000,
+					timeoutMs: supplied.timeout === undefined ? undefined : supplied.timeout * 1000,
 				})
 				if (args.dryRun) {
 					process.stdout.write(await previewChangelog(plan))

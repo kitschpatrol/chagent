@@ -10,6 +10,7 @@ import type {
 	HistoryChangeSet,
 	HistoryRequest,
 } from './types'
+import { defaultEffort, defaultModels } from './defaults'
 import { historyInstructions, instructions } from './instructions'
 import { runCommand } from './process'
 import { categories } from './types'
@@ -114,9 +115,9 @@ async function invokeAgent(
 					'never',
 					'--json',
 					'--model',
-					request.model ?? 'gpt-6.1-sol',
+					request.model ?? defaultModels.codex,
 					'--config',
-					`model_reasoning_effort=${JSON.stringify(request.effort ?? 'xhigh')}`,
+					`model_reasoning_effort=${JSON.stringify(request.effort ?? defaultEffort)}`,
 					'--config',
 					`features.shell_tool=${String(research)}`,
 					'--config',
@@ -161,9 +162,9 @@ async function invokeAgent(
 					'--permission-mode',
 					'dontAsk',
 					'--model',
-					request.model ?? 'claude-opus-5-5',
+					request.model ?? defaultModels.claude,
 					'--effort',
-					request.effort ?? 'xhigh',
+					request.effort ?? defaultEffort,
 				],
 				{
 					allowFailure: true,

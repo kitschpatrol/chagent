@@ -14,6 +14,7 @@ import { validateChanges, validateHistory } from './agents'
 import { historyBatches, researchEvidence, splitEvidence } from './batches'
 import { readCache, writeCache } from './cache'
 import { mergeChanges } from './changelog'
+import { defaultTimeoutMs } from './defaults'
 import { collectEvidence, enrichWithGithub } from './evidence'
 import { instructionVersion } from './instructions'
 import { log } from './log'
@@ -75,7 +76,7 @@ export async function prepareGeneration(
 			},
 			scope: pkg.directory === '.' && repository.packages.length > 0 ? 'repository' : 'package',
 			signal: options.signal,
-			timeoutMs: options.timeoutMs ?? 1_200_000,
+			timeoutMs: options.timeoutMs ?? defaultTimeoutMs,
 			version: release.version,
 		},
 	}
@@ -241,7 +242,7 @@ export async function generateJobs(
 			releases,
 			repositoryRoot: context.repository.root,
 			signal: context.options.signal,
-			timeoutMs: context.options.timeoutMs ?? 1_200_000,
+			timeoutMs: context.options.timeoutMs ?? defaultTimeoutMs,
 		}
 		const results = validateHistory(
 			{ releases: await context.agent.generateHistory(request) },
