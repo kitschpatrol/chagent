@@ -180,6 +180,38 @@ describe('changelog rendering', () => {
 		expect(updateMarkdown(first, [], true)).toBe(first)
 	})
 
+	it('drops the Unreleased comparison link when the draft is promoted', () => {
+		const original =
+			changelogHeader +
+			'\n## [Unreleased]\n\n### Fixed\n\n- A draft note.\n\n## [1.0.0] - 2026-01-01\n\n- First.\n\n' +
+			'[Unreleased]: https://github.com/example/repo/compare/v1.0.0...HEAD\n' +
+			'[1.0.0]: https://github.com/example/repo/releases/tag/v1.0.0\n'
+		const result = updateMarkdown(
+			original,
+			[
+				{
+					changes: [change],
+					existingBody: parseChangelog(original).sections[0]!.body,
+					release: {
+						date: '2026-02-01',
+						previousTag: 'v1.0.0',
+						ref: 'def',
+						tag: 'v1.1.0',
+						version: '1.1.0',
+					},
+				},
+			],
+			false,
+			'example/repo',
+		)
+		expect(result).not.toContain('[Unreleased]')
+		expect(
+			result.endsWith(
+				'[1.0.0]: https://github.com/example/repo/releases/tag/v1.0.0\n[1.1.0]: https://github.com/example/repo/compare/v1.0.0...v1.1.0\n',
+			),
+		).toBe(true)
+	})
+
 	it('adds bullets to their existing category without replacing human notes', () => {
 		const body = '\n### Added\n\n- A handwritten note.\n\n### Fixed\n\n- A fix.\n\n'
 		const result = mergeChanges(body, [change])

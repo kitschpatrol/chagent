@@ -264,24 +264,37 @@ export function updateMarkdown(
 		return content
 	}
 
+	// A promoted draft leaves its comparison link without a heading to use it.
+	if (draftText === '') {
+		footer = footer.replace(UNRELEASED_REFERENCE, '')
+	}
+
 	const generated =
 		sectionSpacing(sectionSpacing(header, newline) + draftText, newline) +
 		additions.toReversed().join('')
 	const preserved = released.join('') + footer
-	let result = preserved === '' ? generated.trimEnd() + newline : generated + preserved
+	const result = preserved === '' ? generated.trimEnd() + newline : generated + preserved
+	return appendDefinitions(result, footer, definitions, newline)
+}
 
-	if (definitions.length > 0) {
-		result =
-			(footer === ''
-				? sectionSpacing(result, newline)
-				: result.endsWith(newline)
-					? result
-					: result + newline) +
-			definitions.join(newline) +
-			newline
+/** Add link reference definitions after any existing footer. */
+function appendDefinitions(
+	content: string,
+	footer: string,
+	definitions: string[],
+	newline: string,
+): string {
+	if (definitions.length === 0) {
+		return content
 	}
 
-	return result
+	const separated =
+		footer === ''
+			? sectionSpacing(content, newline)
+			: content.endsWith(newline)
+				? content
+				: content + newline
+	return separated + definitions.join(newline) + newline
 }
 
 function addNodeNote(header: string, newline: string, nodeException: boolean): string {
