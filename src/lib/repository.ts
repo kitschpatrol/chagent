@@ -224,6 +224,24 @@ function tagVersion(tag: string, pkg: PackageInfo, patterns?: string[]): string 
 	return undefined
 }
 
+/**
+ * Predict the tag of a release that is not tagged yet, so its heading can link
+ * to it. Follow the previous tag's format, then the first configured pattern,
+ * then `v{version}`.
+ */
+function pendingTag(
+	pkg: PackageInfo,
+	version: string,
+	previous: Release | undefined,
+	patterns?: string[],
+): string {
+	const template =
+		previous?.tag?.includes(previous.version) === true
+			? previous.tag.replace(previous.version, '{version}')
+			: (patterns?.[0] ?? 'v{version}')
+	return template.replaceAll('{name}', () => pkg.name).replaceAll('{version}', () => version)
+}
+
 /** Resolve release intervals from reachable tags and locally bumped manifests. */
 export async function resolveReleases(
 	repository: Repository,
@@ -252,7 +270,7 @@ export async function resolveReleases(
 			previousRef: latest?.ref,
 			previousTag: latest?.tag,
 			ref: repository.head,
-			tag: context?.tag,
+			tag: context?.tag ?? pendingTag(pkg, currentVersion, latest, config.tagPatterns),
 			version: currentVersion,
 		})
 	} else if (latest?.ref !== repository.head) {

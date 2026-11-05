@@ -294,6 +294,24 @@ describe('release history', () => {
 		expect(releases.map((release) => release.version)).toEqual(['2.0.0'])
 	})
 
+	it.each([
+		['the previous tag format', ['v1.0.0'], undefined, 'v1.1.0'],
+		['an unprefixed previous tag', ['1.0.0'], undefined, '1.1.0'],
+		['a package-qualified previous tag', ['example@1.0.0'], undefined, 'example@1.1.0'],
+		['v{version} without a previous tag', [], undefined, 'v1.1.0'],
+		['the first configured pattern', [], ['{name}-{version}'], 'example-1.1.0'],
+	])('predicts a pending release tag from %s', async (_label, tags, tagPatterns, tag) => {
+		const root = await createRepository()
+		for (const name of tags) {
+			await git(root, ['tag', name])
+		}
+
+		await writeFiles(root, { 'package.json': '{"name":"example","version":"1.1.0"}' })
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, { tagPatterns })
+		expect(releases.at(-1)).toMatchObject({ pending: true, tag, version: '1.1.0' })
+	})
+
 	it('excludes version-only release commits from PR enrichment evidence', async () => {
 		const root = await createRepository()
 		await git(root, ['tag', 'v1.0.0'])

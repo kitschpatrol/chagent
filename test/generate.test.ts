@@ -347,6 +347,20 @@ describe('generation and writing', () => {
 		).toBe(true)
 	})
 
+	it('links a pending release heading before its tag exists', async () => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		await git(root, ['remote', 'add', 'origin', 'https://github.com/example/fixture.git'])
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await commit(root, 'Change the answer.')
+		await writeFiles(root, { 'package.json': '{"name":"example","version":"1.1.0"}' })
+		const plan = await generateChangelog({ agent: fixtureAgent(), cwd: root, github: false })
+		expect(plan.files[0]?.after).toContain('## [1.1.0] - ')
+		expect(plan.files[0]?.after).toContain(
+			'[1.1.0]: https://github.com/example/fixture/compare/v1.0.0...v1.1.0',
+		)
+	})
+
 	it('keeps an existing changelog when a rebuild finds nothing to record', async () => {
 		const notes = changelogHeader + '\n## Unreleased\n\n### Added\n\n- A handwritten note.\n'
 		const root = await createRepository({ 'changelog.md': notes })
