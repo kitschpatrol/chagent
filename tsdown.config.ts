@@ -2,6 +2,7 @@ import { defineConfig } from 'tsdown'
 
 export default defineConfig({
 	attw: { profile: 'esm-only' },
+	dts: { entry: ['src/lib/bumpp.ts', 'src/lib/index.ts'] },
 	entry: {
 		'bin/cli': 'src/bin/cli.ts',
 		'lib/bumpp': 'src/lib/bumpp.ts',
