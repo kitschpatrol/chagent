@@ -56,7 +56,6 @@
 	"dependencies": {
 		"@clack/prompts": "^1.8.1",
 		"@types/node": "~24.13.6",
-		"@types/yargs": "^17.0.35",
 		"cosmiconfig": "^10.0.1",
 		"cross-spawn": "^7.0.6",
 		"lognow": "^0.8.8",
@@ -70,6 +69,7 @@
 		"@kitschpatrol/shared-config": "^8.14.1",
 		"@types/cross-spawn": "^6.0.6",
 		"@types/semver": "^7.8.0",
+		"@types/yargs": "^17.0.35",
 		"bumpp": "^12.3.0",
 		"mdat-plugin-cli-help": "^3.4.2",
 		"publint": "^0.3.25",
