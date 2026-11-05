@@ -26,16 +26,6 @@ process.once('SIGTERM', () => {
 
 const cli = yargs(hideBin(process.argv))
 
-function explicitArguments<T extends Record<string, unknown>>(args: T): Partial<T> {
-	const { parsed } = cli
-	const defaulted = parsed !== false && 'defaulted' in parsed ? parsed.defaulted : undefined
-	const keys = new Set(
-		typeof defaulted === 'object' && defaulted !== null ? Object.keys(defaulted) : [],
-	)
-	// Values explicitly supplied by the user remain overrides even when they equal a default.
-	return Object.fromEntries(Object.entries(args).filter(([key]) => !keys.has(key))) as Partial<T>
-}
-
 try {
 	await cli
 		.scriptName('chagent')
@@ -52,7 +42,7 @@ try {
 					})
 					.option('agent', {
 						choices: agentNames,
-						default: defaults.agent,
+						defaultDescription: defaults.agent,
 						description: 'Installed agent CLI',
 						type: 'string',
 					})
@@ -63,7 +53,7 @@ try {
 					})
 					.option('effort', {
 						choices: efforts,
-						default: defaults.effort,
+						defaultDescription: defaults.effort,
 						description: 'Reasoning effort',
 						type: 'string',
 					})
@@ -94,12 +84,12 @@ try {
 						type: 'boolean',
 					})
 					.option('github', {
-						default: defaults.github,
+						defaultDescription: String(defaults.github),
 						description: 'Enrich Git evidence using gh when available; disable with --no-github',
 						type: 'boolean',
 					})
 					.option('cache', {
-						default: defaults.cache,
+						defaultDescription: String(defaults.cache),
 						description: 'Cache drafts and incremental state; disable with --no-cache',
 						type: 'boolean',
 					})
@@ -109,31 +99,33 @@ try {
 						type: 'string',
 					})
 					.option('timeout', {
-						default: defaults.timeoutMs / 1000,
+						defaultDescription: String(defaults.timeoutMs / 1000),
 						description: 'Agent timeout in seconds',
 						type: 'number',
 					})
 					.check((args) => {
-						if (!Number.isFinite(args.timeout) || args.timeout <= 0) {
+						if (
+							args.timeout !== undefined &&
+							(!Number.isFinite(args.timeout) || args.timeout <= 0)
+						) {
 							throw new Error('--timeout must be a positive number of seconds.')
 						}
 
 						return true
 					}),
 			async (args) => {
-				// Only explicit flags override repository configuration; the library applies shared defaults.
-				const supplied = explicitArguments(args)
+				// Unset flags stay undefined so repository configuration can apply; the library owns defaults.
 				let plan = await generateChangelog({
-					agent: supplied.agent,
-					cache: supplied.cache,
-					configFile: supplied.config,
+					agent: args.agent,
+					cache: args.cache,
+					configFile: args.config,
 					cwd: args.cwd,
-					effort: supplied.effort,
-					github: supplied.github,
-					model: supplied.model,
+					effort: args.effort,
+					github: args.github,
+					model: args.model,
 					rebuild: args.rebuild,
 					signal: controller.signal,
-					timeoutMs: supplied.timeout === undefined ? undefined : supplied.timeout * 1000,
+					timeoutMs: args.timeout === undefined ? undefined : args.timeout * 1000,
 				})
 				try {
 					if (args.dryRun) {

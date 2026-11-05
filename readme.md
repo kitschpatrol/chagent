@@ -122,9 +122,9 @@ chagent
 | Option                  | Description                                                           | Type                                          | Default                                       |
 | ----------------------- | --------------------------------------------------------------------- | --------------------------------------------- | --------------------------------------------- |
 | `--cwd`                 | Repository directory                                                  | `string`                                      | current directory                             |
-| `--agent`               | Installed agent CLI                                                   | `"codex"` `"claude"`                          | `"codex"`                                     |
+| `--agent`               | Installed agent CLI                                                   | `"codex"` `"claude"`                          | `codex`                                       |
 | `--model`               | Agent model                                                           | `string`                                      | gpt-6.1-sol (Codex); claude-opus-5-5 (Claude) |
-| `--effort`              | Reasoning effort                                                      | `"low"` `"medium"` `"high"` `"xhigh"` `"max"` | `"xhigh"`                                     |
+| `--effort`              | Reasoning effort                                                      | `"low"` `"medium"` `"high"` `"xhigh"` `"max"` | `xhigh`                                       |
 | `--interactive`<br>`-i` | Review a diff and optionally edit before writing                      | `boolean`                                     | `false`                                       |
 | `--editor`              | Editor command for interactive review; configure GUI editors to wait  | `string`                                      | git var GIT_EDITOR                            |
 | `--dry-run`             | Print a diff without applying changes                                 | `boolean`                                     | `false`                                       |

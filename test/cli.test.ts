@@ -28,8 +28,8 @@ async function run(...args: string[]): Promise<{ code: number; stderr: string; s
 
 const VERSION_REGEX = /\d+\.\d+\.\d+/v
 const HELP_DEFAULTS = [
-	/--agent[^\n]*\[default: "codex"\]/v,
-	/--effort[^\n]*\[default: "xhigh"\]/v,
+	/--agent[^\n]*\[default: codex\]/v,
+	/--effort[^\n]*\[default: xhigh\]/v,
 	/--github[^\n]*\[default: true\]/v,
 	/--cache[^\n]*\[default: true\]/v,
 	/--timeout[^\n]*\[default: 1200\]/v,
