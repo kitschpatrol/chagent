@@ -42,8 +42,7 @@
 		"chagent": "dist/bin/cli.js"
 	},
 	"files": [
-		"dist",
-		"docs/third-party-notices.md"
+		"dist"
 	],
 	"scripts": {
 		"build": "tsdown",

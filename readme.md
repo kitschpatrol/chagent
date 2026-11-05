@@ -279,10 +279,6 @@ Drafts and checkpoints are stored under the checkout's Git directory in `chagent
 
 [kitschpatrol](https://github.com/kitschpatrol)
 
-## Acknowledgments
-
-The bundled instructions adapt Rebecca Rae Barton's [release-notes skill](https://skillmd.com/skills/thatrebeccarae/release-notes). See [third-party notices](docs/third-party-notices.md) for provenance and licensing.
-
 <!-- contributing -->
 
 ## Contributing
