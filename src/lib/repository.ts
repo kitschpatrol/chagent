@@ -124,7 +124,7 @@ export async function inspectRepository(
 		'for-each-ref',
 		'--merged',
 		head,
-		'--format=%(refname:short)',
+		'--format=%(refname:strip=2)',
 		'refs/tags',
 	])
 	const tags: Repository['tags'] = []
@@ -133,7 +133,7 @@ export async function inspectRepository(
 			continue
 		}
 
-		const commit = await git(root, ['rev-parse', name + '^{commit}'], true)
+		const commit = await git(root, ['rev-parse', 'refs/tags/' + name + '^{commit}'], true)
 		if (commit === '') {
 			continue
 		}

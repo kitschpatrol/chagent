@@ -114,6 +114,21 @@ describe('release history', () => {
 		},
 	)
 
+	it('reads tags that share a name with a branch', async () => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		await git(root, ['branch', 'v1.0.0'])
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await commit(root, 'Move the branch away from the tag.')
+		await git(root, ['branch', '--force', 'v1.0.0', 'HEAD'])
+		const repository = await inspectRepository(root)
+		expect(repository.tags.map((tag) => tag.name)).toEqual(['v1.0.0'])
+		const tagged = await git(root, ['rev-parse', 'refs/tags/v1.0.0'])
+		expect(repository.tags[0]?.commit).toBe(tagged)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		expect(releases.map((release) => release.version)).toEqual(['1.0.0', 'Unreleased'])
+	})
+
 	it('retains documentation and maintenance evidence for historical research', async () => {
 		const root = await createRepository({
 			'index.js': 'export { publicMethod } from "./internal.js"\n',
