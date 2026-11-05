@@ -1,4 +1,5 @@
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReleaseRequest } from '../src/lib/types'
@@ -174,5 +175,18 @@ fs.writeSync(1, 'event'.repeat(7_000_000));
 		await expect(
 			runCommand(process.execPath, ['-e', 'process.exit(0)'], { signal: controller.signal }),
 		).rejects.toThrow()
+	})
+
+	it('names a command that is not installed', async () => {
+		await expect(runCommand('chagent-missing-command', [])).rejects.toThrow(
+			'Cannot find chagent-missing-command. Install it and make sure it is on your PATH.',
+		)
+	})
+
+	it('names a working directory that does not exist', async () => {
+		const missing = path.join(os.tmpdir(), `chagent-missing-${crypto.randomUUID()}`)
+		await expect(runCommand(process.execPath, ['-e', ''], { cwd: missing })).rejects.toThrow(
+			`Cannot run ${process.execPath} in ${missing}: the directory does not exist.`,
+		)
 	})
 })

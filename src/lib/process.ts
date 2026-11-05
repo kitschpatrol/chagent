@@ -1,4 +1,5 @@
 import crossSpawn from 'cross-spawn'
+import { existsSync } from 'node:fs'
 import { log } from './log'
 
 const STDOUT_LIMIT = 32_000_000
@@ -19,6 +20,20 @@ type CommandOptions = {
 	/** Keep only the end of stdout, for long event streams that nothing parses. */
 	tailStdout?: boolean
 	timeoutMs?: number
+}
+
+/**
+ * Explain a failed spawn; Node reports a missing command and a missing working
+ * directory with the same ENOENT code.
+ */
+function spawnFailure(command: string, cwd: string | undefined, error: Error): string {
+	if (!('code' in error) || error.code !== 'ENOENT') {
+		return `Could not run ${command}: ${error.message}`
+	}
+
+	return cwd === undefined || existsSync(cwd)
+		? `Cannot find ${command}. Install it and make sure it is on your PATH.`
+		: `Cannot run ${command} in ${cwd}: the directory does not exist.`
 }
 
 /** Run a command with argument boundaries preserved and bounded output. */
@@ -81,7 +96,7 @@ export async function runCommand(
 		})
 		child.stdin?.end(options.input)
 		child.on('error', (error) => {
-			failure = new Error(`Could not run ${command}: ${error.message}`, { cause: error })
+			failure = new Error(spawnFailure(command, options.cwd, error), { cause: error })
 		})
 		child.on('close', (code) => {
 			clearTimeout(timer)
