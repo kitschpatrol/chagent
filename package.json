@@ -49,7 +49,7 @@
 		"clean-deep": "shx rm -f pnpm-lock.yaml && git clean -fdX",
 		"fix": "pnpm build && ksc fix",
 		"lint": "pnpm build && ksc lint",
-		"release": "bumpp --commit 'Release: %s' && pnpm build && pnpm publish --otp $(op item get npm --otp)",
+		"release": "bumpp --commit 'Release: %s' && pnpm build && pnpm publish --otp $(op item get npm --otp) && brewpub --tap kitschpatrol/tap",
 		"test": "pnpm build && vitest run"
 	},
 	"dependencies": {
@@ -69,6 +69,7 @@
 		"@types/cross-spawn": "^6.0.6",
 		"@types/semver": "^7.8.0",
 		"@types/yargs": "^17.0.35",
+		"brewpub": "^0.5.1",
 		"bumpp": "^12.3.0",
 		"fast-check": "^4.10.2",
 		"mdat-plugin-cli-help": "^3.4.2",

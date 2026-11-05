@@ -26,12 +26,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Integrate with bumpp 12.3.0+ through `createBumppHook`, optionally reviewing changes and including generated changelogs alongside version-update files.
 - Offer `--amend` and `amendRelease` for verified unpublished version-only release commits, preserving unrelated staged work and tag annotations while refusing published releases and signed tags.
 - Show session status and elapsed time, expose library `onProgress` and `setLogger` hooks, and provide `--verbose` logging for commands, cache decisions, and timing.
+- Exclude changelogs, package-root generated output, and version-only release bookkeeping from source evidence while retaining lockfile-only maintenance commits.
+- Isolate built-in agent research with restricted permissions, disabled user customizations, and ephemeral sessions.
 
 ### Documentation
 
 - Document local, global, and `npx` installation, agent authentication, CLI help, and library, configuration, monorepo, and rebuild examples.
 - Explain bumpp CLI and hook workflows, interactive editor requirements, and supported post-bump amendment with publication and signing constraints.
+- Explain supported release headings, generated-output exclusions, historical manifest handling, and agent context limits.
 
 ### Maintenance
 
 - Establish TypeScript builds, shared linting, cross-platform CI, release automation, and integration and property tests.
+- Centralize option resolution and validation, and separate generation orchestration from package and workspace planning.
+- Batch local Git commit, tag, and historical manifest reads to reduce subprocess overhead.

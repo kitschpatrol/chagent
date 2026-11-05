@@ -5,6 +5,7 @@
 [![NPM Package @kitschpatrol/chagent](https://img.shields.io/npm/v/@kitschpatrol/chagent.svg)](https://www.npmjs.com/package/@kitschpatrol/chagent)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/license/mit)
 [![CI](https://github.com/kitschpatrol/chagent/actions/workflows/ci.yml/badge.svg)](https://github.com/kitschpatrol/chagent/actions/workflows/ci.yml)
+[![Homebrew](https://img.shields.io/badge/Homebrew-kitschpatrol%2Ftap%2Fchagent-FBB040?logo=homebrew&logoColor=white)](https://github.com/kitschpatrol/homebrew-tap/blob/HEAD/Formula/chagent.rb)
 
 <!-- /badges -->
 
@@ -73,6 +74,12 @@ Run it once without installing:
 
 ```sh
 npx @kitschpatrol/chagent
+```
+
+Or install it globally with Homebrew:
+
+```sh
+brew install kitschpatrol/tap/chagent
 ```
 
 Or install it globally with npm:
