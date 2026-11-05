@@ -40,7 +40,11 @@ const args = process.argv.slice(2);
 fs.writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(args));
 const input = JSON.parse(fs.readFileSync(0, 'utf8').split('Input data (JSON):\n')[1]);
 if (process.cwd() !== (input.repositoryRoot ?? input.repository.root)) process.exit(9);
-const changes = (release) => [{ category: 'Added', description: 'Support an additional export.', breaking: false, sources: [release.evidence[0].id] }];
+const changes = (release) => [
+  { category: 'Added', description: 'Support an additional export.', breaking: false, sources: [release.evidence[0].id] },
+  { category: 'Documentation', description: 'Document the new export.', breaking: false, sources: [release.evidence[0].id] },
+  { category: 'Maintenance', description: 'Refresh test tooling.', breaking: false, sources: [release.evidence[0].id] },
+];
 const result = input.releases ? { releases: input.releases.map((release) => ({ id: release.id, changes: changes(release) })) } : { changes: changes(input) };
 if (${JSON.stringify(name)} === 'codex') {
   fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], JSON.stringify(result));
@@ -63,6 +67,11 @@ if (${JSON.stringify(name)} === 'codex') {
 				repository: { directory: '.', excludeDirectories: [], root, to: 'HEAD' },
 			})
 			expect(changes[0]?.description).toBe('Support an additional export.')
+			expect(changes.map((change) => change.category)).toEqual([
+				'Added',
+				'Documentation',
+				'Maintenance',
+			])
 			const args: unknown = JSON.parse(await readFile(argsFile, 'utf8'))
 			expect(args).not.toContain('--bare')
 			const expected =

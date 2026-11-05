@@ -22,13 +22,26 @@ Projects can use any language or build system. Version tags supply release bound
 
 Between releases, it will add changes under the `Unreleased` heading. Historical release sections retain their original Markdown.
 
-Initialization reconstructs the complete reachable release history, including the initial release's capabilities and meaningful documentation, dependency, compatibility, build, test, and CI changes. Maintenance releases receive useful descriptions within the canonical changelog categories.
+Initialization reconstructs the complete reachable release history, including the initial release's capabilities and meaningful documentation, dependency, compatibility, build, test, and CI changes. Releases containing only maintenance still receive useful descriptions.
 
 Codex and Claude research missing releases together in one session, sharing their understanding of the project across versions and packages. Very large histories split into additional sessions only when their release context exceeds the input budget. Ordinary single-release updates use one request.
 
 The CLI and TypeScript library use your installed, authenticated Codex or Claude Code CLI. Codex defaults to `gpt-6.1-sol`; Claude defaults to [Opus 5.5](https://platform.claude.com/docs/en/models/opus-5-5/overview) (`claude-opus-5-5`). Both use `xhigh` reasoning effort by default. No separate API key or installed agent skill is required.
 
-Output uses the canonical [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) header and categories.
+Output uses the canonical [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) header and extends its six standard categories with `Documentation` and `Maintenance`. The standard headings describe user-facing concerns, including public APIs and runtime compatibility; the extensions also capture documentation and internal development work.
+
+| Heading         | Covers                                                                                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Added`         | New user-facing features and public APIs.                                                                                                                                                                    |
+| `Changed`       | Changes to existing user-facing functionality, public APIs, or runtime support.                                                                                                                              |
+| `Deprecated`    | Features and public APIs scheduled for removal.                                                                                                                                                              |
+| `Removed`       | Removed features and public APIs.                                                                                                                                                                            |
+| `Fixed`         | Bugs affecting users or library consumers.                                                                                                                                                                   |
+| `Security`      | Vulnerability fixes affecting users or library consumers.                                                                                                                                                    |
+| `Documentation` | All documentation changes, including guides, examples, API documentation, and help text.                                                                                                                     |
+| `Maintenance`   | Other changes without a user-facing feature change, bug fix, vulnerability fix, or documentation change, including routine dependency updates, internal refactoring, builds, tests, CI, and release tooling. |
+
+Categories follow the impact of a change. A dependency update that fixes a user-facing bug belongs under `Fixed`, while a routine dependency refresh or a fix to development tooling belongs under `Maintenance`. Documentation-only corrections belong under `Documentation`.
 
 You can invoke it directly, or easily integrate it with a [bumpp](https://github.com/antfu-collective/bumpp)-powered release workflow.
 
@@ -153,7 +166,7 @@ chagent --dry-run --no-github
 
 `previewChangelog(plan)` returns a unified diff. `reviewChangelog(plan, { editor })` provides terminal review and returns an edited plan, or `undefined` when cancelled. `amendRelease(plan)` is the explicit legacy release integration described below. `setLogger(logger)` enables library logging; library calls are silent by default.
 
-Custom providers implement the exported `AgentAdapter` type and can be passed as `agent`. Their `generate(request)` method returns `Change[]`, with canonical categories and source IDs from `request.evidence`. Requests distinguish initialization from updates, identify the initial release, and provide the repository path, scope, and Git refs. Set `repositoryAccess: true` when an adapter can research the repository directly; it receives a bounded starting context and a range citation for additional findings. Research adapters can also implement `generateHistory(request)` to investigate multiple releases together. It receives a `HistoryRequest` and returns a `HistoryChangeSet[]`, with every requested release ID exactly once and citations from that release's own evidence. Adapters without this method keep using `generate(request)` for each release; adapters without repository access receive complete patches in batches. Give an adapter a stable `cacheKey` to enable reusable draft caching, and change that key when its behavior changes. All adapter results receive the same output validation.
+Custom providers implement the exported `AgentAdapter` type and can be passed as `agent`. Their `generate(request)` method returns `Change[]`, with one of the eight supported categories and source IDs from `request.evidence`. Requests distinguish initialization from updates, identify the initial release, and provide the repository path, scope, and Git refs. Set `repositoryAccess: true` when an adapter can research the repository directly; it receives a bounded starting context and a range citation for additional findings. Research adapters can also implement `generateHistory(request)` to investigate multiple releases together. It receives a `HistoryRequest` and returns a `HistoryChangeSet[]`, with every requested release ID exactly once and citations from that release's own evidence. Adapters without this method keep using `generate(request)` for each release; adapters without repository access receive complete patches in batches. Give an adapter a stable `cacheKey` to enable reusable draft caching, and change that key when its behavior changes. All adapter results receive the same output validation.
 
 #### API Examples
 
@@ -219,7 +232,7 @@ Workspace declarations in `pnpm-workspace.yaml` or `package.json` determine the 
 
 For other monorepo layouts, configure `packages` directory globs. These directories do not need npm manifests; their Git tags identify releases, using the directory basename as the package name.
 
-Shared-version repositories use repository versions at the root. Independently versioned repositories use package-qualified headings such as `@example/package@1.2.0`. Repository infrastructure changes appear in the root's `Unreleased` section. Explicit workspace dependencies contribute relevant source context to dependent packages. Dependency and tooling maintenance belongs under `Changed`; generated build output is excluded.
+Shared-version repositories use repository versions at the root. Independently versioned repositories use package-qualified headings such as `@example/package@1.2.0`. Repository infrastructure changes appear in the root's `Unreleased` section. Explicit workspace dependencies contribute relevant source context to dependent packages. Dependency and tooling maintenance belongs under `Maintenance`; generated build output is excluded.
 
 GitHub links to package changelogs on the default branch remain usable when a root entry is extracted for GitHub release notes.
 

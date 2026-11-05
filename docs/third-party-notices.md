@@ -7,9 +7,9 @@ The bundled changelog instructions are adapted from **release-notes**, version
 - Author: <https://github.com/thatrebeccarae>
 - Declared license: MIT
 
-The adaptation uses canonical Keep a Changelog categories, structured agent
-output, optional interactive review, and Git evidence collected by the host
-application. It does not reproduce the skill's version suggestions or publishing
+The adaptation extends Keep a Changelog's categories with Documentation and
+Maintenance, and uses structured agent output, optional interactive review,
+and Git evidence collected by the host application. It does not reproduce the skill's version suggestions or publishing
 workflow. The instructions are bundled with chagent; no skill is downloaded or
 installed at runtime.
 

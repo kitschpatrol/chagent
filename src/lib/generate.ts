@@ -245,7 +245,7 @@ function aggregateChanges(repository: Repository, summaries: ReleaseSummary[]): 
 		if (highlights.length === 0) {
 			changes.push({
 				breaking: false,
-				category: 'Changed',
+				category: 'Maintenance',
 				description: `${link}: See the package changelog.`,
 				sources: [],
 			})

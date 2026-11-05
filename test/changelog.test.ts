@@ -18,7 +18,7 @@ const change: Change = {
 }
 
 describe('changelog rendering', () => {
-	it('creates the exact canonical header and only canonical categories', () => {
+	it('creates the exact canonical header', () => {
 		const result = updateMarkdown(
 			undefined,
 			[{ changes: [change], release: { date: '2026-01-01', ref: 'abc', version: '1.0.0' } }],
@@ -26,6 +26,33 @@ describe('changelog rendering', () => {
 		)
 		expect(result).toBe(
 			`${changelogHeader}\n## 1.0.0 - 2026-01-01\n\n### Added\n\n- Support custom themes.\n\n`,
+		)
+	})
+
+	it('keeps documentation and maintenance notes in their headings when promoting a draft', () => {
+		const history = '## 1.0.0 - 2026-01-01\n\n### Changed\n\n* Keep this historical entry.\n\n'
+		const draft =
+			'\n### Documentation\n\n- Preserve this handwritten guide.\n\n### Maintenance\n\n- Refresh test tooling.\n\n'
+		const original = changelogHeader + '\n## Unreleased\n' + draft + history
+		const result = updateMarkdown(
+			original,
+			[
+				{
+					changes: [
+						{ ...change, category: 'Documentation', description: 'Correct the API example.' },
+						{ ...change, category: 'Maintenance', description: 'Refresh test tooling.' },
+						{ ...change, category: 'Maintenance', description: 'Add a CI workflow.' },
+					],
+					existingBody: draft,
+					release: { date: '2026-02-01', ref: 'def', version: '1.1.0' },
+				},
+			],
+			false,
+		)
+		expect(result).toBe(
+			changelogHeader +
+				'\n## 1.1.0 - 2026-02-01\n\n### Documentation\n\n- Preserve this handwritten guide.\n- Correct the API example.\n\n### Maintenance\n\n- Refresh test tooling.\n- Add a CI workflow.\n\n' +
+				history,
 		)
 	})
 

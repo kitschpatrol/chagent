@@ -5,6 +5,8 @@ export const categories = [
 	'Removed',
 	'Fixed',
 	'Security',
+	'Documentation',
+	'Maintenance',
 ] as const
 
 export type Category = (typeof categories)[number]
