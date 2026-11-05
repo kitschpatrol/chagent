@@ -2,7 +2,9 @@ import type {
 	AgentAdapter,
 	Change,
 	ChangelogPlan,
+	ChangeSet,
 	Evidence,
+	GenerationRequest,
 	PackageInfo,
 	Release,
 	ReleaseRequest,
@@ -157,6 +159,37 @@ function progressMessage(pending: ReleaseRequest[], sessions: number): string {
 }
 
 /**
+ * Run one agent session. A long session is worth saving, so invalid output gets
+ * one correction request before the run fails.
+ */
+async function runSession(
+	context: GenerationContext,
+	releases: ReleaseRequest[],
+): Promise<ChangeSet[]> {
+	const { agent, options, repository } = context
+	const request: GenerationRequest = {
+		releases,
+		repositoryRoot: repository.root,
+		settings: {
+			effort: options.effort,
+			model: options.model,
+			signal: options.signal,
+			timeoutMs: options.timeoutMs,
+		},
+	}
+	const response = await agent.generate(request)
+	try {
+		return validateResponse(response, releases)
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error)
+		log.warn(`Requesting a correction of invalid agent output. ${message}`)
+		options.signal?.throwIfAborted()
+		const corrected = await agent.generate({ ...request, repair: { error: message, response } })
+		return validateResponse(corrected, releases)
+	}
+}
+
+/**
  * Research all outstanding release ranges together before rendering any
  * changelog.
  *
@@ -166,7 +199,7 @@ export async function generateReleases(
 	context: GenerationContext,
 	requests: ReleaseRequest[],
 ): Promise<Map<string, Change[]>> {
-	const { agent, options, repository } = context
+	const { options } = context
 	const results = new Map<string, Change[]>()
 	const active = requests.filter((release) => release.evidence.length > 0)
 	if (active.length === 0) {
@@ -193,17 +226,8 @@ export async function generateReleases(
 	log.info(progressMessage(pending, batches.length))
 	for (const releases of batches) {
 		options.signal?.throwIfAborted()
-		const response = await agent.generate({
-			releases,
-			repositoryRoot: repository.root,
-			settings: {
-				effort: options.effort,
-				model: options.model,
-				signal: options.signal,
-				timeoutMs: options.timeoutMs,
-			},
-		})
-		for (const { changes, id } of validateResponse(response, releases)) {
+		const changeSets = await runSession(context, releases)
+		for (const { changes, id } of changeSets) {
 			results.set(id, changes)
 			await saveChanges(context, unabridged.get(id)!, changes)
 		}

@@ -69,6 +69,11 @@ export type RunSettings = {
 /** One or more releases to research together in a single session. */
 export type GenerationRequest = {
 	releases: ReleaseRequest[]
+	/**
+	 * A previous response that failed validation, to correct rather than research
+	 * again.
+	 */
+	repair?: { error: string; response: unknown }
 	repositoryRoot: string
 	settings: RunSettings
 }

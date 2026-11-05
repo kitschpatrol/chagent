@@ -342,6 +342,42 @@ describe('generation and writing', () => {
 		await expect(writeChangelog(plan)).rejects.toThrow('not a regular file')
 	})
 
+	it.each([
+		['- A stray bullet.', 'A stray bullet.'],
+		['* Another stray bullet.', 'Another stray bullet.'],
+		['1. A numbered entry.', 'A numbered entry.'],
+		['A wrapped\n  entry\twith  gaps. ', 'A wrapped entry with gaps.'],
+	])('normalizes the description %j without a correction request', async (raw, expected) => {
+		const root = await createRepository()
+		const agent = fixtureAgent()
+		agent.generate.mockImplementation(async (request) => {
+			await Promise.resolve()
+			const { releases } = describeReleases(request)
+			releases[0]!.changes[0]!.description = raw
+			return { releases }
+		})
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		expect(agent.generate).toHaveBeenCalledOnce()
+		expect(plan.files[0]?.after).toContain(`- ${expected}\n`)
+	})
+
+	it.each([['# A heading.'], ['<!-- Hidden. -->'], ['-   ']])(
+		'names the release when the description %j cannot be repaired',
+		async (raw) => {
+			const root = await createRepository()
+			const agent = fixtureAgent()
+			agent.generate.mockImplementation(async (request) => {
+				await Promise.resolve()
+				const { releases } = describeReleases(request)
+				releases[0]!.changes[0]!.description = raw
+				return { releases }
+			})
+			await expect(generateChangelog({ agent, cwd: root, github: false })).rejects.toThrow(
+				'Agent output for .@Unreleased has an empty description, heading, or hidden markup',
+			)
+		},
+	)
+
 	it('rejects unsupported evidence citations before producing file edits', async () => {
 		const root = await createRepository()
 		const agent = fixtureAgent()

@@ -37,7 +37,9 @@ describe('agent protocols', () => {
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 fs.writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(args));
-const input = JSON.parse(fs.readFileSync(0, 'utf8').split('Input data (JSON):\n')[1]);
+const stdin = fs.readFileSync(0, 'utf8');
+fs.writeFileSync(${JSON.stringify(path.join(root, 'stdin.txt'))}, stdin);
+const input = JSON.parse(stdin.split('Input data (JSON):\n')[1]);
 if (process.cwd() !== input.repositoryRoot) process.exit(9);
 const changes = (release) => [
   { category: 'Added', description: 'Support an additional export.', breaking: false, sources: [release.evidence[0].id] },
@@ -105,6 +107,18 @@ if (${JSON.stringify(name)} === 'codex') {
 							'xhigh',
 						]
 			expect(args).toEqual(expect.arrayContaining(expected))
+			expect(await readFile(path.join(root, 'stdin.txt'), 'utf8')).not.toContain(
+				'failed validation',
+			)
+			await createAgent(name).generate({
+				releases: [release],
+				repair: { error: 'Agent output omitted requested releases.', response: { releases: [] } },
+				repositoryRoot: root,
+				settings: { effort: 'xhigh', timeoutMs: 5000 },
+			})
+			const correction = await readFile(path.join(root, 'stdin.txt'), 'utf8')
+			expect(correction).toContain('failed validation: Agent output omitted requested releases.')
+			expect(correction).toContain('{"releases":[]}')
 		},
 	)
 

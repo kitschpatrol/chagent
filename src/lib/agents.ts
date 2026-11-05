@@ -17,7 +17,9 @@ import { runCommand } from './process'
 import { categories } from './types'
 
 const CONTROL_CHARACTERS = /\p{Cc}/v
-const LIST_OR_HEADING = /^(?:#{1,6}\s|[\-*]\s|\d+\.\s)/v
+const HEADING = /^#{1,6}\s/v
+const LIST_MARKER = /^(?:[\-*]|\d+\.)(?:\s+|$)/v
+const WHITESPACE_RUN = /\s+/gv
 const responseSchema = z.strictObject({
 	releases: z.array(
 		z.strictObject({
@@ -35,50 +37,81 @@ const responseSchema = z.strictObject({
 })
 const responseJsonSchema = JSON.stringify(z.toJSONSchema(responseSchema, { target: 'draft-07' }))
 
-function validateChanges(changes: Change[], release: ReleaseRequest): void {
+/** Repair formatting mistakes that cannot change what an entry says. */
+function normalizeDescription(description: string): string {
+	return description.replaceAll(WHITESPACE_RUN, ' ').trim().replace(LIST_MARKER, '')
+}
+
+function validateChanges(changes: Change[], release: ReleaseRequest): Change[] {
 	const ids = new Set(release.evidence.map((item) => item.id))
-	for (const change of changes) {
-		if (change.sources.some((source) => !ids.has(source))) {
-			throw new Error('Agent output cites evidence that was not supplied.')
+	return changes.map((change) => {
+		const unknown = change.sources.filter((source) => !ids.has(source))
+		if (unknown.length > 0) {
+			throw new Error(
+				`Agent output for ${release.id} cites evidence that was not supplied: ${unknown.join(', ')}.`,
+			)
 		}
 
+		const description = normalizeDescription(change.description)
 		if (
-			CONTROL_CHARACTERS.test(change.description) ||
-			LIST_OR_HEADING.test(change.description) ||
-			change.description.includes('<!--')
+			description === '' ||
+			CONTROL_CHARACTERS.test(description) ||
+			HEADING.test(description) ||
+			description.includes('<!--')
 		) {
-			throw new Error('Agent output contains a heading, multiline entry, or hidden markup.')
+			throw new Error(
+				`Agent output for ${release.id} has an empty description, heading, or hidden markup: ${JSON.stringify(change.description)}.`,
+			)
 		}
-	}
+
+		return { ...change, description }
+	})
 }
 
 /**
  * Validate structure, completeness, release identity, and citations before
  * accepting any adapter's output.
+ *
+ * @returns The change sets, with descriptions normalized.
  */
 export function validateResponse(value: unknown, releases: ReleaseRequest[]): ChangeSet[] {
-	const response = responseSchema.parse(value)
+	const response = responseSchema.safeParse(value)
+	if (!response.success) {
+		throw new Error(
+			`Agent output does not match the response format:\n${z.prettifyError(response.error)}`,
+			{ cause: response.error },
+		)
+	}
+
 	const expected = new Map(releases.map((release) => [release.id, release]))
-	const seen = new Set<string>()
-	for (const { changes, id } of response.releases) {
-		const release = expected.get(id)
-		if (release === undefined || seen.has(id)) {
-			throw new Error('Agent output contains an unknown or duplicate release id.')
-		}
-
-		validateChanges(changes, release)
-		seen.add(id)
+	const ids = response.data.releases.map(({ id }) => id)
+	const unexpected = ids.filter((id, index) => !expected.has(id) || ids.indexOf(id) !== index)
+	if (unexpected.length > 0) {
+		throw new Error(
+			`Agent output contains unknown or duplicate release ids: ${unexpected.join(', ')}.`,
+		)
 	}
 
-	if (seen.size !== expected.size) {
-		throw new Error('Agent output omitted requested releases.')
+	const omitted = expected
+		.keys()
+		.filter((id) => !ids.includes(id))
+		.toArray()
+	if (omitted.length > 0) {
+		throw new Error(`Agent output omitted requested releases: ${omitted.join(', ')}.`)
 	}
 
-	return response.releases
+	return response.data.releases.map(({ changes, id }) => ({
+		changes: validateChanges(changes, expected.get(id)!),
+		id,
+	}))
 }
 
-function prompt({ releases, repositoryRoot }: GenerationRequest): string {
-	return `${instructions}\n\nInput data (JSON):\n${JSON.stringify({ releases, repositoryRoot })}`
+function prompt({ releases, repair, repositoryRoot }: GenerationRequest): string {
+	const correction =
+		repair === undefined
+			? ''
+			: `\n\nYour previous response failed validation: ${repair.error}\nPrevious response (JSON):\n${JSON.stringify(repair.response)}\nReturn the complete corrected JSON object. Keep your previous findings, and repeat only the research the correction needs.`
+	return `${instructions}${correction}\n\nInput data (JSON):\n${JSON.stringify({ releases, repositoryRoot })}`
 }
 
 async function runCodex(request: GenerationRequest): Promise<unknown> {

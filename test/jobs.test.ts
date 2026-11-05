@@ -2,7 +2,12 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { GenerationContext } from '../src/lib/jobs'
-import type { AgentAdapter, GenerationRequest, ReleaseRequest } from '../src/lib/types'
+import type {
+	AgentAdapter,
+	GenerationRequest,
+	GenerationResponse,
+	ReleaseRequest,
+} from '../src/lib/types'
 import { parseChangelog } from '../src/lib/changelog'
 import { defaults } from '../src/lib/defaults'
 import { generateChangelog } from '../src/lib/generate'
@@ -116,55 +121,89 @@ describe('shared history generation', () => {
 		},
 	)
 
-	it.each(['missing', 'duplicate', 'unknown', 'cross-release'] as const)(
-		'rejects %s release results before rendering or caching',
-		async (invalid) => {
+	describe.each([
+		['missing', 'omitted requested releases: .@1.0.1'],
+		['duplicate', 'unknown or duplicate release ids: .@1.0.0'],
+		['unknown', 'unknown or duplicate release ids: not-a-release'],
+		['cross-release', 'for .@1.0.0 cites evidence that was not supplied: range:'],
+		['malformed', 'does not match the response format'],
+	] as const)('%s release results', (invalid, expectedError) => {
+		async function twoReleases(): Promise<string> {
 			const root = await createRepository({ 'main.py': 'answer = 42\n' }, false)
 			await git(root, ['tag', 'v1.0.0'])
 			await writeFiles(root, { 'main.py': 'answer = 43\n' })
 			await commit(root, 'Improve the answer.')
 			await git(root, ['tag', 'v1.0.1'])
+			return root
+		}
+
+		function invalidResponse(request: GenerationRequest): GenerationResponse {
+			const { releases } = describeReleases(request)
+			switch (invalid) {
+				case 'cross-release': {
+					releases[0]!.changes[0]!.sources = releases[1]!.changes[0]!.sources
+					break
+				}
+
+				case 'duplicate': {
+					releases.push(releases[0]!)
+					break
+				}
+
+				case 'malformed': {
+					return { releases: 'none' } as unknown as GenerationResponse
+				}
+
+				case 'missing': {
+					releases.pop()
+					break
+				}
+
+				case 'unknown': {
+					releases[0]!.id = 'not-a-release'
+					break
+				}
+			}
+
+			return { releases }
+		}
+
+		it('gets one correction request naming the problem', async () => {
+			const root = await twoReleases()
 			const agent = fixtureAgent()
 			agent.generate.mockImplementationOnce(async (request) => {
 				await Promise.resolve()
-				const { releases: results } = describeReleases(request)
-				switch (invalid) {
-					case 'cross-release': {
-						results[0]!.changes[0]!.sources = results[1]!.changes[0]!.sources
-
-						break
-					}
-
-					case 'duplicate': {
-						results.push(results[0]!)
-
-						break
-					}
-
-					case 'missing': {
-						results.pop()
-
-						break
-					}
-
-					case 'unknown': {
-						results[0]!.id = 'not-a-release'
-
-						break
-					}
-				}
-
-				return { releases: results }
+				return invalidResponse(request)
 			})
+			const plan = await generateChangelog({ agent, cwd: root, github: false })
+			expect(agent.generate).toHaveBeenCalledTimes(2)
+			const { releases, repair } = agent.generate.mock.calls[1]![0]
+			expect(repair?.error).toContain(expectedError)
+			expect(repair?.response).toBeDefined()
+			expect(releases).toHaveLength(2)
+			expect(parseChangelog(plan.files[0]!.after).sections).toHaveLength(2)
+		})
+
+		it('stops before rendering or caching when the correction is also invalid', async () => {
+			const root = await twoReleases()
+			const agent = fixtureAgent()
+			const invalidOnce = async (request: GenerationRequest) => {
+				await Promise.resolve()
+				return invalidResponse(request)
+			}
+
+			agent.generate.mockImplementationOnce(invalidOnce).mockImplementationOnce(invalidOnce)
 			const options = { agent, cwd: root, github: false }
-			await expect(generateChangelog(options)).rejects.toThrow()
+			await expect(generateChangelog(options)).rejects.toThrow(expectedError)
+			expect(agent.generate).toHaveBeenCalledTimes(2)
 			await expect(readFile(path.join(root, 'changelog.md'))).rejects.toThrow()
 			const retry = await generateChangelog(options)
-			expect(agent.generate).toHaveBeenCalledTimes(2)
-			expect(agent.generate.mock.calls[1]![0].releases).toHaveLength(2)
+			expect(agent.generate).toHaveBeenCalledTimes(3)
+			expect(agent.generate.mock.calls[2]![0].repair).toBeUndefined()
+			expect(agent.generate.mock.calls[2]![0].releases).toHaveLength(2)
 			expect(retry.files).toHaveLength(1)
-		},
-	)
+		})
+	})
 
 	it('reuses completed sessions after a later history session fails', async () => {
 		const root = await createRepository()
