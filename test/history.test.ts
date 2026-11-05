@@ -294,6 +294,24 @@ describe('release history', () => {
 		expect(await collectEvidence(repository, repository.rootPackage, releases[1]!)).toEqual([])
 	})
 
+	it.each([
+		['an empty', ''],
+		['a comment-only', '# Settings come later.\n'],
+		['a settings-only', 'onlyBuiltDependencies:\n  - esbuild\n'],
+	])('reads %s pnpm-workspace.yaml as declaring no packages', async (_label, text) => {
+		const root = await createRepository({ 'pnpm-workspace.yaml': text })
+		const repository = await inspectRepository(root)
+		expect(repository.packages).toEqual([])
+	})
+
+	it.each([
+		['packages: 5\n', 'Invalid pnpm-workspace.yaml'],
+		['packages: [\n', 'Cannot parse pnpm-workspace.yaml'],
+	])('names pnpm-workspace.yaml when it is unusable: %j', async (text, message) => {
+		const root = await createRepository({ 'pnpm-workspace.yaml': text })
+		await expect(inspectRepository(root)).rejects.toThrow(message)
+	})
+
 	it('discovers pnpm packages and their independent tags', async () => {
 		const root = await createRepository({
 			'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',

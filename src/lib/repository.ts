@@ -27,6 +27,8 @@ const manifestSchema = z.object({
 		.optional(),
 })
 
+const pnpmWorkspaceSchema = z.object({ packages: z.array(z.string()).optional() }).nullable()
+
 type Manifest = z.infer<typeof manifestSchema>
 
 /**
@@ -302,8 +304,8 @@ export async function resolveReleases(
 }
 
 /**
- * Detect stable minor/patch releases, including one about to be published,
- * that raised the minimum Node.js requirement.
+ * Detect stable minor/patch releases, including one about to be published, that
+ * raised the minimum Node.js requirement.
  */
 export async function hasNodeException(
 	repository: Repository,
@@ -349,6 +351,31 @@ export async function hasNodeException(
 	return false
 }
 
+/**
+ * Read package globs from pnpm-workspace.yaml, which may be empty or hold only
+ * settings.
+ */
+function pnpmWorkspaceGlobs(text: string): string[] | undefined {
+	let value: unknown
+	try {
+		value = parse(text)
+	} catch (error) {
+		throw new Error(
+			`Cannot parse pnpm-workspace.yaml: ${error instanceof Error ? error.message : String(error)}`,
+			{ cause: error },
+		)
+	}
+
+	const workspace = pnpmWorkspaceSchema.safeParse(value)
+	if (!workspace.success) {
+		throw new Error(`Invalid pnpm-workspace.yaml:\n${z.prettifyError(workspace.error)}`, {
+			cause: workspace.error,
+		})
+	}
+
+	return workspace.data?.packages
+}
+
 async function workspacePackages(
 	root: string,
 	manifest: Manifest | undefined,
@@ -359,9 +386,7 @@ async function workspacePackages(
 		: (manifest?.workspaces?.packages ?? [])
 	const workspaceText = await readOptional(path.join(root, 'pnpm-workspace.yaml'))
 	if (workspaceText !== undefined) {
-		patterns =
-			z.object({ packages: z.array(z.string()).optional() }).parse(parse(workspaceText)).packages ??
-			patterns
+		patterns = pnpmWorkspaceGlobs(workspaceText) ?? patterns
 	}
 
 	patterns = config.packages ?? patterns
