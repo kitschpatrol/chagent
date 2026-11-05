@@ -3,7 +3,7 @@ import type { ChangelogPlan, GenerateOptions } from './types'
 import { generateChangelog } from './generate'
 import { git } from './process'
 import { createProgressLine } from './progress'
-import { reviewChangelog } from './review'
+import { assertReviewTerminal, reviewChangelog } from './review'
 import { writeChangelog } from './write'
 
 const TAG_TOKEN = /\{(version|oldVersion|tag|releaseType|major|minor|patch|date)\}/gv
@@ -53,6 +53,10 @@ function tagName(
 export function createBumppHook(options: BumppHookOptions = {}): ExecuteHook {
 	const { editor, interactive, onProgress, ...generateOptions } = options
 	return async (operation) => {
+		if (interactive === true) {
+			assertReviewTerminal()
+		}
+
 		const progress =
 			onProgress === undefined && process.stderr.isTTY
 				? createProgressLine(process.stderr)

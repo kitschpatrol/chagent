@@ -1,3 +1,4 @@
+import { realpath } from 'node:fs/promises'
 import path from 'node:path'
 import type { ChangelogPlan } from './types'
 import { git, isAncestor, runCommand } from './process'
@@ -49,12 +50,7 @@ async function assertUnpublished(root: string, head: string, tags: Tag[]): Promi
 	}
 }
 
-async function inspectRelease(plan: ChangelogPlan): Promise<Tag[]> {
-	const { head, root } = plan
-	if ((await git(root, ['rev-parse', 'HEAD'])) !== head) {
-		throw new Error('HEAD changed during generation; refusing to amend.')
-	}
-
+async function inspectRelease(root: string, head: string): Promise<Tag[]> {
 	if ((await git(root, ['symbolic-ref', '-q', 'HEAD'], true)) === '') {
 		throw new Error('Amendment requires a checked-out branch.')
 	}
@@ -120,12 +116,22 @@ async function tagContents(root: string, object: string): Promise<string | undef
 	return result.stdout
 }
 
+/** Refuse an ineligible amendment before generation spends an agent session. */
+export async function assertAmendable(cwd: string): Promise<void> {
+	const root = await realpath(await git(cwd, ['rev-parse', '--show-toplevel']))
+	await inspectRelease(root, await git(root, ['rev-parse', 'HEAD']))
+}
+
 /**
  * Explicitly amend an unpublished version-only release and its matching local
  * tags.
  */
 export async function amendRelease(plan: ChangelogPlan): Promise<string> {
-	const tags = await inspectRelease(plan)
+	if ((await git(plan.root, ['rev-parse', 'HEAD'])) !== plan.head) {
+		throw new Error('HEAD changed during generation; refusing to amend.')
+	}
+
+	const tags = await inspectRelease(plan.root, plan.head)
 	const files = await writeChangelog(plan)
 	if (files.length === 0) {
 		return plan.head

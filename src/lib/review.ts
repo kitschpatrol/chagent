@@ -126,17 +126,21 @@ async function editCandidates(
 	return undefined
 }
 
-/** Review a diff and optionally edit temporary candidates before applying them. */
-export async function reviewChangelog(
-	plan: ChangelogPlan,
-	options: { editor?: string } = {},
-): Promise<ChangelogPlan | undefined> {
+/** Check for a terminal before generation spends an agent session on a review. */
+export function assertReviewTerminal(): void {
 	if (!process.stdin.isTTY || !process.stdout.isTTY) {
 		throw new Error(
 			'Interactive review requires a terminal. Use --dry-run to inspect a diff without one.',
 		)
 	}
+}
 
+/** Review a diff and optionally edit temporary candidates before applying them. */
+export async function reviewChangelog(
+	plan: ChangelogPlan,
+	options: { editor?: string } = {},
+): Promise<ChangelogPlan | undefined> {
+	assertReviewTerminal()
 	const candidate = structuredClone(plan)
 	if (candidate.files.length === 0) {
 		return candidate

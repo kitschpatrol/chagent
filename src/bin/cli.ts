@@ -12,8 +12,10 @@ import {
 	setLogger,
 	writeChangelog,
 } from '../lib'
+import { assertAmendable } from '../lib/amend'
 import { defaultModels, defaults } from '../lib/defaults'
 import { createProgressLine } from '../lib/progress'
+import { assertReviewTerminal } from '../lib/review'
 import { agentNames, efforts } from '../lib/types'
 
 /**
@@ -176,6 +178,14 @@ try {
 						return true
 					}),
 			async (args) => {
+				if (!args.dryRun && args.interactive) {
+					assertReviewTerminal()
+				}
+
+				if (!args.dryRun && args.amend) {
+					await assertAmendable(args.cwd)
+				}
+
 				// Unset flags stay undefined so repository configuration can apply; the library owns defaults.
 				const reporter = createReporter(args.verbose, controller.signal)
 				let plan = await reporter.track(async () =>

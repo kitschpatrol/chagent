@@ -1,4 +1,4 @@
-import { versionBump } from 'bumpp'
+import { versionBump, versionBumpInfo } from 'bumpp'
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -146,6 +146,16 @@ describe('release integration', () => {
 
 		expect(output).toContain('Researching 2 release ranges in 1 shared agent session.')
 		expect(output).toContain('The formatter failed.')
+	})
+
+	it('refuses interactive review without a terminal before generating', async () => {
+		const root = await createRepository()
+		const generate = vi.fn(agent.generate)
+		const hook = createBumppHook({ agent: { ...agent, generate }, interactive: true })
+		await expect(hook(await versionBumpInfo({ cwd: root, release: '1.0.1' }))).rejects.toThrow(
+			'Interactive review requires a terminal',
+		)
+		expect(generate).not.toHaveBeenCalled()
 	})
 
 	it('stops bumpp before committing or tagging if generation fails', async () => {

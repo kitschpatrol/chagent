@@ -260,6 +260,24 @@ describe('cli', () => {
 		expect(timeout.stderr).toContain('positive number')
 	})
 
+	it.each([
+		[['--interactive'], 'Interactive review requires a terminal'],
+		[['--amend'], 'recognizable release commit message'],
+	])('refuses %s before starting an agent session', async (flags, message) => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFile(path.join(root, 'index.js'), 'export const answer = 43\n')
+		await git(root, ['commit', '-am', 'Change the answer.'])
+		await installCliFixtures(root)
+		const result = await runCommand(process.execPath, [cliPath, '--no-github', ...flags], {
+			allowFailure: true,
+			cwd: root,
+		})
+		expect(result.code).toBe(1)
+		expect(result.stderr).toContain(message)
+		await expect(readFile(path.join(root, '.git', 'calls.jsonl'))).rejects.toThrow()
+	})
+
 	it('reports a failure while running as its message alone', async () => {
 		const root = await createRepository()
 		await rm(path.join(root, '.git'), { force: true, recursive: true })
