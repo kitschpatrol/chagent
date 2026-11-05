@@ -71,8 +71,40 @@ describe('changelog rendering', () => {
 			false,
 		)
 		expect(result).toBe(
-			`${changelogHeader}\n## 1.0.0 - 2026-01-01\n\n### Added\n\n- Support custom themes.\n\n`,
+			`${changelogHeader}\n## 1.0.0 - 2026-01-01\n\n### Added\n\n- Support custom themes.\n`,
 		)
+	})
+
+	it.each([
+		['a new draft', undefined, 'Unreleased', '\n'],
+		['a new release', undefined, '1.0.0', '\n'],
+		['an existing draft', `${changelogHeader}\n## Unreleased\n\n- Old.\n\n\n`, 'Unreleased', '\n'],
+		[
+			'a CRLF changelog',
+			changelogHeader.replaceAll('\n', '\r\n') + '\r\n## Unreleased\r\n\r\n- Old.\r\n\r\n',
+			'Unreleased',
+			'\r\n',
+		],
+	])('ends the file with one newline after writing %s', (_label, original, version, newline) => {
+		const result = updateMarkdown(
+			original,
+			[{ changes: [change], release: { ref: 'abc', version } }],
+			false,
+		)
+		expect(result.endsWith(`- Support custom themes.${newline}`)).toBe(true)
+	})
+
+	it('separates a draft that ended the file from a section added below it', () => {
+		const result = updateMarkdown(
+			`${changelogHeader}\n## Unreleased\n\n- Keep this draft.\n`,
+			[{ changes: [change], release: { ref: 'abc', version: '1.0.0' } }],
+			false,
+		)
+		expect(result).toContain('- Keep this draft.\n\n## 1.0.0\n')
+		expect(parseChangelog(result).sections.map((section) => section.version)).toEqual([
+			'Unreleased',
+			'1.0.0',
+		])
 	})
 
 	it('keeps documentation and maintenance notes in their headings when promoting a draft', () => {

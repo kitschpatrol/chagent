@@ -264,11 +264,11 @@ export function updateMarkdown(
 		return content
 	}
 
-	const prefix = sectionSpacing(header, newline)
-	let result = prefix + draftText + additions.toReversed().join('') + released.join('')
-	if (footer !== '') {
-		result += footer
-	}
+	const generated =
+		sectionSpacing(sectionSpacing(header, newline) + draftText, newline) +
+		additions.toReversed().join('')
+	const preserved = released.join('') + footer
+	let result = preserved === '' ? generated.trimEnd() + newline : generated + preserved
 
 	if (definitions.length > 0) {
 		result =
