@@ -335,6 +335,21 @@ describe('generation and writing', () => {
 		expect(agent.generate).toHaveBeenCalledTimes(2)
 	})
 
+	it('reports progress between agent sessions, including corrections', async () => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await commit(root, 'Change the answer.')
+		const agent = fixtureAgent()
+		agent.generate.mockResolvedValueOnce({ releases: [] })
+		const onProgress = vi.fn<(message: string) => void>()
+		await generateChangelog({ agent, cwd: root, github: false, onProgress })
+		expect(onProgress.mock.calls.map(([message]) => message)).toEqual([
+			'Researching 2 release ranges in 1 shared agent session.',
+			'Requesting a correction of invalid agent output.',
+		])
+	})
+
 	it('rejects a symlink substituted for a changelog', async () => {
 		const root = await createRepository()
 		const plan = await generateChangelog({ agent: fixtureAgent(), cwd: root, github: false })

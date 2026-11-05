@@ -183,6 +183,7 @@ async function runSession(
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error)
 		log.warn(`Requesting a correction of invalid agent output. ${message}`)
+		options.onProgress?.('Requesting a correction of invalid agent output.')
 		options.signal?.throwIfAborted()
 		const corrected = await agent.generate({ ...request, repair: { error: message, response } })
 		return validateResponse(corrected, releases)
@@ -223,7 +224,9 @@ export async function generateReleases(
 
 	const unabridged = new Map(pending.map((release) => [release.id, release]))
 	const batches = releaseBatches(pending, options.maxInputChars)
-	log.info(progressMessage(pending, batches.length))
+	const status = progressMessage(pending, batches.length)
+	log.info(status)
+	options.onProgress?.(status)
 	for (const releases of batches) {
 		options.signal?.throwIfAborted()
 		const changeSets = await runSession(context, releases)

@@ -108,6 +108,8 @@ export type GenerateOptions = Omit<Config, 'agent'> & {
 	agent?: AgentAdapter | AgentName
 	configFile?: string
 	cwd?: string
+	/** Receives a short status message as generation moves between agent sessions. */
+	onProgress?: (message: string) => void
 	/**
 	 * Explicitly reconstruct all history instead of preserving existing release
 	 * sections.
@@ -119,6 +121,7 @@ export type GenerateOptions = Omit<Config, 'agent'> & {
 
 /** Options after configuration layers and defaults have been applied. */
 export type ResolvedOptions = Omit<ResolvedConfig, 'agent'> & {
+	onProgress?: (message: string) => void
 	rebuild: boolean
 	release?: ReleaseContext
 	signal?: AbortSignal

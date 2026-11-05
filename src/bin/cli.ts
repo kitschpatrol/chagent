@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { spinner } from '@clack/prompts'
 import path from 'node:path'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
@@ -15,7 +16,40 @@ import {
 import { defaultModels, defaults } from '../lib/defaults'
 import { agentNames, efforts } from '../lib/types'
 
-setLogger({ ...console, debug: console.error, info: console.error, log: console.error })
+const progress = process.stderr.isTTY
+	? spinner({ indicator: 'timer', output: process.stderr })
+	: undefined
+let status = 'Reading repository history.'
+
+function logDetail(...args: unknown[]): void {
+	if (progress === undefined) {
+		console.error(...args)
+	}
+}
+
+function logProblem(...args: unknown[]): void {
+	progress?.clear()
+	console.error(...args)
+	progress?.start(status)
+}
+
+async function withProgress<T>(work: () => Promise<T>): Promise<T> {
+	progress?.start(status)
+	try {
+		return await work()
+	} finally {
+		progress?.clear()
+	}
+}
+
+setLogger({
+	...console,
+	debug: logDetail,
+	error: logProblem,
+	info: logDetail,
+	log: logDetail,
+	warn: logProblem,
+})
 const controller = new AbortController()
 process.once('SIGINT', () => {
 	controller.abort()
@@ -115,18 +149,24 @@ try {
 					}),
 			async (args) => {
 				// Unset flags stay undefined so repository configuration can apply; the library owns defaults.
-				let plan = await generateChangelog({
-					agent: args.agent,
-					cache: args.cache,
-					configFile: args.config,
-					cwd: args.cwd,
-					effort: args.effort,
-					github: args.github,
-					model: args.model,
-					rebuild: args.rebuild,
-					signal: controller.signal,
-					timeoutMs: args.timeout === undefined ? undefined : args.timeout * 1000,
-				})
+				let plan = await withProgress(async () =>
+					generateChangelog({
+						agent: args.agent,
+						cache: args.cache,
+						configFile: args.config,
+						cwd: args.cwd,
+						effort: args.effort,
+						github: args.github,
+						model: args.model,
+						onProgress(message) {
+							status = message
+							progress?.message(message)
+						},
+						rebuild: args.rebuild,
+						signal: controller.signal,
+						timeoutMs: args.timeout === undefined ? undefined : args.timeout * 1000,
+					}),
+				)
 				try {
 					if (args.dryRun) {
 						process.stdout.write(await previewChangelog(plan))

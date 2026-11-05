@@ -19,6 +19,7 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 		agent: selected,
 		configFile,
 		cwd: _cwd,
+		onProgress,
 		rebuild = false,
 		release,
 		signal,
@@ -46,7 +47,7 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 			config.cache && agent.cacheKey !== undefined
 				? path.join(repository.gitDirectory, 'chagent', 'drafts')
 				: undefined,
-		options: { ...config, github, rebuild, release, signal },
+		options: { ...config, github, onProgress, rebuild, release, signal },
 		plan,
 		repository,
 	}
