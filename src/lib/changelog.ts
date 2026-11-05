@@ -22,6 +22,8 @@ const UNRELEASED_REFERENCE = /^\[unreleased\]:[^\r\n]*(?:\r?\n)?/imv
 
 export const changelogHeader =
 	'# Changelog\n\nAll notable changes to this project will be documented in this file.\n\nThe format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),\nand this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).\n'
+/** The body of a release section without any changes to record. */
+export const noNotableChanges = 'No notable changes.'
 export const nodeExceptionNote =
 	'(Node.js support requirements have sometimes increased in minor or patch releases.)'
 
@@ -243,7 +245,7 @@ export function updateMarkdown(
 				continue
 			}
 
-			body = `${newline}No notable changes.${newline}`
+			body = newline + noNotableChanges + newline
 		}
 
 		const section = heading + newline + newline + body.trim() + newline + newline

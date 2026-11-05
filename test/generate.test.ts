@@ -553,6 +553,33 @@ describe('generation and writing', () => {
 		expect(repeated.files).toEqual([])
 	})
 
+	it('leaves packages without notable changes out of a shared-version root summary', async () => {
+		const root = await createRepository({
+			'packages/a/index.js': 'export const a = 1\n',
+			'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',
+			'packages/b/package.json': '{"name":"@example/b","version":"1.0.0"}',
+			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+		})
+		await git(root, ['tag', 'v1.0.0'])
+		const agent = fixtureAgent()
+		await writeChangelog(await generateChangelog({ agent, cwd: root, github: false }))
+		await writeFiles(root, { 'packages/a/index.js': 'export const a = 2\n' })
+		await commit(root, 'Improve a.')
+		await writeFiles(root, {
+			'package.json': '{"engines":{"node":">=18"},"name":"example","version":"1.0.1"}',
+			'packages/a/package.json': '{"name":"@example/a","version":"1.0.1"}',
+			'packages/b/package.json': '{"name":"@example/b","version":"1.0.1"}',
+		})
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		const edit = (file: string) => plan.files.find((item) => item.path === path.join(root, file))
+		expect(edit('packages/b/changelog.md')?.after).toContain('## 1.0.1 - ')
+		const release = parseChangelog(edit('changelog.md')!.after).sections.find(
+			(section) => section.version === '1.0.1',
+		)
+		expect(release?.body).toContain('@example/a 1.0.1')
+		expect(release?.body).not.toContain('@example/b')
+	})
+
 	it('uses package-qualified root entries for independent versions', async () => {
 		const root = await createRepository({
 			'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',

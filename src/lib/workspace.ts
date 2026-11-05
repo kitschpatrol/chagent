@@ -1,8 +1,22 @@
 import path from 'node:path'
 import type { GenerationContext as Context } from './jobs'
 import type { PackagePlan } from './package-plan'
-import type { Category, Change, Release, ReleaseRequest, ReleaseSummary, Repository } from './types'
-import { findChangelog, LINE_BOUNDARY, parseChangelog, updateMarkdown } from './changelog'
+import type {
+	Category,
+	Change,
+	ChangelogPlan,
+	Release,
+	ReleaseRequest,
+	ReleaseSummary,
+	Repository,
+} from './types'
+import {
+	findChangelog,
+	LINE_BOUNDARY,
+	noNotableChanges,
+	parseChangelog,
+	updateMarkdown,
+} from './changelog'
 import { generateReleases, prepareRelease } from './jobs'
 import {
 	incrementalBase,
@@ -190,11 +204,30 @@ function aggregateIndependent(
 	recordCheckpoint(context, file.path, after, prepared.release)
 }
 
+/**
+ * Find package releases whose own section records no notable changes, so a
+ * shared release summary can leave them out.
+ */
+function quietReleases(plan: ChangelogPlan, packages: PackagePlan[]): Set<string> {
+	const quiet = new Set<string>()
+	for (const { file } of packages) {
+		const text = plan.files.find((edit) => edit.path === file.path)?.after ?? file.content ?? ''
+		for (const section of parseChangelog(text).sections) {
+			if (section.body.trim() === noNotableChanges) {
+				quiet.add(`${file.path}@${section.version}`)
+			}
+		}
+	}
+
+	return quiet
+}
+
 function aggregateShared(
 	context: Context,
 	prepared: PackagePlan,
 	results: Map<string, Change[]>,
 	exception: boolean,
+	quiet: Set<string>,
 ): void {
 	const { plan, repository } = context
 	renderPackage(context, prepared, results)
@@ -206,7 +239,10 @@ function aggregateShared(
 	const additions = prepared.summaries.map((summary) => ({
 		changes: aggregateChanges(
 			repository,
-			plan.releases.filter((item) => item.version === summary.version),
+			plan.releases.filter(
+				(item) =>
+					item.version === summary.version && !quiet.has(`${item.changelogPath}@${item.version}`),
+			),
 		),
 		existingBody: parseChangelog(rootEdit.after).sections.find(
 			(section) => section.version === summary.version,
@@ -268,7 +304,7 @@ export async function generateWorkspace(context: Context): Promise<void> {
 	plan.releases.push(...summaries)
 	const exception = packages.some((pkg) => pkg.exception)
 	if (root !== undefined) {
-		aggregateShared(context, root, results, exception)
+		aggregateShared(context, root, results, exception, quietReleases(plan, packages))
 	} else if (independent !== undefined) {
 		aggregateIndependent(context, independent, results, summaries, exception)
 	}
