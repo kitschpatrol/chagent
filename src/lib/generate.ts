@@ -60,7 +60,10 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 	}
 	const github = config.github && (await enrichReleaseDates(repository, plan.diagnostics, signal))
 	// Like bumpp, a release context describes the package being released from cwd.
-	const location = path.relative(root, await realpath(cwd)).split(path.sep).join('/')
+	const location = path
+		.relative(root, await realpath(cwd))
+		.split(path.sep)
+		.join('/')
 	const releaseDirectory =
 		repository.packages.findLast(
 			({ directory }) => location === directory || location.startsWith(`${directory}/`),

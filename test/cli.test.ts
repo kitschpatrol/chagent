@@ -290,9 +290,7 @@ describe('cli', () => {
 		const { code, stderr, stdout } = await run('--cwd', root, '--no-github')
 		expect(code).toBe(1)
 		expect(stdout).toBe('')
-		expect(stderr.trim().split('\n')).toEqual([
-			expect.stringContaining('not a git repository'),
-		])
+		expect(stderr.trim().split('\n')).toEqual([expect.stringContaining('not a git repository')])
 	})
 
 	it('runs without flags and writes a canonical changelog without committing', async () => {
