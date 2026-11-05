@@ -28,7 +28,7 @@ export type GenerationContext = {
  * Prepare one release without launching a model, so repository research can be
  * shared.
  */
-export async function prepareGeneration(
+export async function prepareRelease(
 	context: GenerationContext,
 	pkg: PackageInfo,
 	release: Release,

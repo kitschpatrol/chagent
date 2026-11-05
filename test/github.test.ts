@@ -11,7 +11,7 @@ import type {
 import { defaults } from '../src/lib/defaults'
 import { enrichWithGithub } from '../src/lib/evidence'
 import { generateChangelog } from '../src/lib/generate'
-import { generateReleases } from '../src/lib/generation'
+import { generateReleases } from '../src/lib/jobs'
 import { git, runCommand } from '../src/lib/process'
 import { createRepository, describeReleases } from './helpers'
 
