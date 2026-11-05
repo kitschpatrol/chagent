@@ -136,6 +136,39 @@ describe('generation and writing', () => {
 		)
 	})
 
+	it('treats a broken package.json fixture changed between releases as source content', async () => {
+		const root = await createRepository({ 'test/fixtures/bad/package.json': '{ invalid one' })
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'test/fixtures/bad/package.json': '{ invalid two' })
+		await commit(root, 'Update the broken fixture.')
+		await git(root, ['tag', 'v1.0.1'])
+		const plan = await generateChangelog({ agent: fixtureAgent(), cwd: root, github: false })
+		expect(parseChangelog(plan.files[0]!.after).sections[0]?.body).toContain(
+			'Improve example in 1.0.1.',
+		)
+	})
+
+	it('survives a broken root package.json earlier in history', async () => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'package.json': '<<<<<<< HEAD\n{"name":"example"}\n' })
+		await commit(root, 'Commit a merge conflict.')
+		await writeFiles(root, { 'package.json': '{"name":"example","version":"1.0.0"}' })
+		await commit(root, 'Resolve the merge conflict.')
+		const plan = await generateChangelog({ agent: fixtureAgent(), cwd: root, github: false })
+		expect(parseChangelog(plan.files[0]!.after).sections[0]?.version).toBe('Unreleased')
+	})
+
+	it('names the file when a current workspace package.json cannot be parsed', async () => {
+		const root = await createRepository({
+			'packages/a/package.json': '{ invalid',
+			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+		})
+		await expect(
+			generateChangelog({ agent: fixtureAgent(), cwd: root, github: false }),
+		).rejects.toThrow('Cannot parse packages/a/package.json')
+	})
+
 	it('treats an existing Conventional Changelog file as already recording its releases', async () => {
 		const original =
 			'# Changelog\n\n# [1.1.0](https://example.com/compare/v1.0.0...v1.1.0) (2026-02-01)\n\n### Features\n\n* A handwritten feature.\n\n## [1.0.0](https://example.com/releases/v1.0.0) (2026-01-01)\n\n### Bug Fixes\n\n* A handwritten fix.\n'

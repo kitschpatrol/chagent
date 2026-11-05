@@ -5,6 +5,7 @@ import semver from 'semver'
 import { parse } from 'yaml'
 import { z } from 'zod'
 import type { Config, PackageInfo, Release, ReleaseContext, Repository } from './types'
+import { log } from './log'
 import { git, runCommand } from './process'
 
 const GITHUB_REMOTE = /github\.com[:\/]([^\/]+\/[^\/]+?)(?:\.git)?$/v
@@ -21,6 +22,8 @@ const manifestSchema = z.object({
 		.optional(),
 })
 
+type Manifest = z.infer<typeof manifestSchema>
+
 /** Read an optional UTF-8 file, distinguishing absence from other I/O failures. */
 export async function readOptional(file: string): Promise<string | undefined> {
 	try {
@@ -34,14 +37,49 @@ export async function readOptional(file: string): Promise<string | undefined> {
 	}
 }
 
-/** Read package metadata from a committed snapshot, never from generated notes. */
-export async function manifestAt(root: string, directory: string, ref: string) {
-	const text = await git(
-		root,
-		['show', `${ref}:${directory === '.' ? '' : directory + '/'}package.json`],
-		true,
-	)
-	return text === '' ? undefined : manifestSchema.parse(JSON.parse(text))
+function parseManifest(text: string, label: string): Manifest {
+	try {
+		return manifestSchema.parse(JSON.parse(text))
+	} catch (error) {
+		throw new Error(
+			`Cannot parse ${label}: ${error instanceof Error ? error.message : String(error)}`,
+			{ cause: error },
+		)
+	}
+}
+
+/**
+ * Read package metadata from a committed snapshot, never from generated notes.
+ * History can contain broken manifests, so an unreadable one counts as absent.
+ */
+export async function manifestAt(
+	root: string,
+	directory: string,
+	ref: string,
+): Promise<Manifest | undefined> {
+	const object = `${ref}:${directory === '.' ? '' : directory + '/'}package.json`
+	const text = await git(root, ['show', object], true)
+	if (text === '') {
+		return undefined
+	}
+
+	try {
+		return parseManifest(text, object)
+	} catch (error) {
+		log.warn(
+			`Ignoring a historical manifest. ${error instanceof Error ? error.message : String(error)}`,
+		)
+		return undefined
+	}
+}
+
+function parseJsonObject(text: string): Record<string, unknown> | undefined {
+	try {
+		return z.record(z.string(), z.unknown()).safeParse(JSON.parse(text)).data
+	} catch {
+		// Invalid JSON is ordinary source content, such as a parser's test fixture.
+		return undefined
+	}
 }
 
 /** Recognize release bookkeeping without dropping meaningful manifest changes. */
@@ -51,16 +89,13 @@ export async function isVersionOnlyChange(
 	beforeRef: string,
 	afterRef: string,
 ): Promise<boolean> {
-	const before = await git(root, ['show', `${beforeRef}:${file}`], true)
-	const after = await git(root, ['show', `${afterRef}:${file}`], true)
-	if (before === '' || after === '') {
-		return false
-	}
-
-	const schema = z.record(z.string(), z.unknown())
-	const oldValue = schema.parse(JSON.parse(before))
-	const newValue = schema.parse(JSON.parse(after))
-	return isDeepStrictEqual({ ...oldValue, version: undefined }, { ...newValue, version: undefined })
+	const oldValue = parseJsonObject(await git(root, ['show', `${beforeRef}:${file}`], true))
+	const newValue = parseJsonObject(await git(root, ['show', `${afterRef}:${file}`], true))
+	return (
+		oldValue !== undefined &&
+		newValue !== undefined &&
+		isDeepStrictEqual({ ...oldValue, version: undefined }, { ...newValue, version: undefined })
+	)
 }
 
 /**
@@ -82,7 +117,7 @@ export async function inspectRepository(
 	const head = await git(root, ['rev-parse', '--verify', 'HEAD'])
 	const gitDirectory = await git(root, ['rev-parse', '--absolute-git-dir'])
 	const rootText = await readOptional(path.join(root, 'package.json'))
-	const manifest = rootText === undefined ? undefined : manifestSchema.parse(JSON.parse(rootText))
+	const manifest = rootText === undefined ? undefined : parseManifest(rootText, 'package.json')
 	const packages = await workspacePackages(root, manifest, config)
 
 	const tagText = await git(root, [
@@ -121,7 +156,7 @@ export async function inspectRepository(
 }
 
 function packageInfo(
-	manifest: undefined | z.infer<typeof manifestSchema>,
+	manifest: Manifest | undefined,
 	directory: string,
 	fallback?: string,
 ): PackageInfo {
@@ -246,7 +281,7 @@ export async function hasNodeException(
 
 async function workspacePackages(
 	root: string,
-	manifest: undefined | z.infer<typeof manifestSchema>,
+	manifest: Manifest | undefined,
 	config: Pick<Config, 'exclude' | 'packages'>,
 ): Promise<PackageInfo[]> {
 	let patterns = Array.isArray(manifest?.workspaces)
@@ -294,7 +329,7 @@ async function workspacePackages(
 
 		packages.push(
 			packageInfo(
-				text === undefined ? undefined : manifestSchema.parse(JSON.parse(text)),
+				text === undefined ? undefined : parseManifest(text, `${directory}/package.json`),
 				directory,
 				path.posix.basename(directory),
 			),
