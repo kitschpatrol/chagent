@@ -75,6 +75,45 @@ describe('release history', () => {
 		expect(await collectEvidence(repository, repository.rootPackage, release)).toEqual([])
 	})
 
+	it('excludes generated output only at the top of a package', async () => {
+		const root = await createRepository({
+			'packages/build/dist/out.js': 'export const generated = 1\n',
+			'packages/build/package.json': '{"name":"@example/build","version":"1.0.0"}',
+			'packages/build/src/dist/source.js': 'export const source = 1\n',
+			'packages/changelog/package.json': '{"name":"@example/changelog","version":"1.0.0"}',
+			'packages/changelog/src/index.js': 'export const source = 1\n',
+			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+		})
+		await git(root, ['tag', 'v1.0.0'])
+		const repository = await inspectRepository(root)
+		const [build, changelog] = repository.packages
+		const [buildRelease] = await resolveReleases(repository, build!, {})
+		const [changelogRelease] = await resolveReleases(repository, changelog!, {})
+		const buildEvidence = await collectEvidence(repository, build!, buildRelease!)
+		const changelogEvidence = await collectEvidence(repository, changelog!, changelogRelease!)
+		const buildIds = buildEvidence.map((item) => item.id)
+		expect(buildIds).toContain('diff:packages/build/src/dist/source.js')
+		expect(buildIds).not.toContain('diff:packages/build/dist/out.js')
+		expect(changelogEvidence.map((item) => item.id)).toContain(
+			'diff:packages/changelog/src/index.js',
+		)
+	})
+
+	it.each(['dist/out.js', 'coverage/report.txt', 'docs/CHANGELOG.md'])(
+		'ignores a commit that only touches %s',
+		async (file) => {
+			const root = await createRepository()
+			await git(root, ['tag', 'v1.0.0'])
+			await writeFiles(root, { [file]: 'Generated.\n' })
+			await commit(root, 'Regenerate output.')
+			const repository = await inspectRepository(root)
+			const releases = await resolveReleases(repository, repository.rootPackage, {})
+			expect(await collectEvidence(repository, repository.rootPackage, releases.at(-1)!)).toEqual(
+				[],
+			)
+		},
+	)
+
 	it('retains documentation and maintenance evidence for historical research', async () => {
 		const root = await createRepository({
 			'index.js': 'export { publicMethod } from "./internal.js"\n',

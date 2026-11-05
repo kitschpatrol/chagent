@@ -4,11 +4,19 @@ import type { Evidence, PackageInfo, Release, Repository } from './types'
 import { git, runCommand } from './process'
 import { isVersionOnlyChange, manifestAt } from './repository'
 
-const GENERATED_PATH = /(?:^|\/)(?:changelog(?:\.md)?|node_modules|dist|build|coverage)(?:\/|$)/iv
+const GENERATED_DIRECTORY = /^(?:build|changelog|coverage|dist)(?:\/|$)/iv
+const GENERATED_ANYWHERE = /(?:^|\/)(?:changelog(?:\.md)?$|node_modules(?:\/|$))/iv
 const LOCKFILE_PATH = /(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?)$/v
 
-function ignored(file: string): boolean {
-	return GENERATED_PATH.test(file)
+/**
+ * Generated output lives at the top of a package, so `packages/build` and
+ * `src/dist` remain source.
+ */
+function ignored(file: string, packages: PackageInfo[]): boolean {
+	// Packages are sorted by directory, so the last match is the most deeply nested owner.
+	const owner = packages.findLast(({ directory }) => file.startsWith(`${directory}/`))
+	const relative = owner === undefined ? file : file.slice(owner.directory.length + 1)
+	return GENERATED_ANYWHERE.test(file) || GENERATED_DIRECTORY.test(relative)
 }
 
 async function scopes(repository: Repository, pkg: PackageInfo, ref: string): Promise<string[]> {
@@ -124,7 +132,7 @@ export async function collectEvidence(
 	])
 	const changed: string[] = []
 	for (const file of awaitedResult1.split('\0')) {
-		if (file === '' || ignored(file)) {
+		if (file === '' || ignored(file, repository.packages)) {
 			continue
 		}
 
@@ -158,7 +166,9 @@ export async function collectEvidence(
 			'--',
 			...paths,
 		])
-		const files = awaitedResult3.split('\0').filter((file) => file !== '' && !ignored(file))
+		const files = awaitedResult3
+			.split('\0')
+			.filter((file) => file !== '' && !ignored(file, repository.packages))
 		if (
 			files.every((file) => !changed.includes(file)) ||
 			!(await hasSourceChanges(root, files, commit))
