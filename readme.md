@@ -103,6 +103,8 @@ Interactive review edits temporary candidate files. After the editor exits, the 
 
 The default command writes changelog files without staging or committing them.
 
+Add `--verbose` to log resolved options, Git and agent commands, cache decisions, and session timing to stderr. On a terminal, it replaces the progress timer with plain lines.
+
 Use `chagent --rebuild --interactive` to reconstruct an existing changelog from history and review the replacement. This explicitly replaces historical prose, including manual edits; ordinary runs preserve it. Use `--rebuild --dry-run` to preview the reconstruction without writing files. In a monorepo, rebuilding covers both package changelogs and the root summary.
 
 <!-- cli-help -->
@@ -134,6 +136,7 @@ chagent
 | `--cache`               | Cache drafts and incremental state; disable with --no-cache           | `boolean`                                     | `true`                                        |
 | `--config`              | Configuration file path                                               | `string`                                      | auto-detected from repository root            |
 | `--timeout`             | Agent timeout in seconds                                              | `number`                                      | `1200`                                        |
+| `--verbose`             | Log commands, cache decisions, and session details to stderr          | `boolean`                                     | `false`                                       |
 | `--help`<br>`-h`        | Show help                                                             | `boolean`                                     |                                               |
 | `--version`<br>`-v`     | Show version number                                                   | `boolean`                                     |                                               |
 

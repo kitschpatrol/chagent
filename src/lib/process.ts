@@ -1,8 +1,10 @@
 import crossSpawn from 'cross-spawn'
+import { log } from './log'
 
 const STDOUT_LIMIT = 32_000_000
 const STDERR_LIMIT = 4_000_000
 const FAILURE_OUTPUT_LENGTH = 4000
+const LOGGED_COMMAND_LENGTH = 300
 const OBJECT_BATCH_SIZE = 500
 const OBJECT_HEADER = /^[\da-f]+ (\w+) (\d+)$/v
 
@@ -26,6 +28,8 @@ export async function runCommand(
 	options: CommandOptions = {},
 ): Promise<{ code: number; stderr: string; stdout: string }> {
 	options.signal?.throwIfAborted()
+	log.debug(`Running: ${[command, ...args].join(' ').slice(0, LOGGED_COMMAND_LENGTH)}`)
+	const started = performance.now()
 	return new Promise((resolve, reject) => {
 		const detached = options.inherit !== true && process.platform !== 'win32'
 		const child = crossSpawn(command, args, {
@@ -83,6 +87,9 @@ export async function runCommand(
 			clearTimeout(timer)
 			options.signal?.removeEventListener('abort', abort)
 			const exitCode = code ?? 1
+			log.debug(
+				`Finished ${command} (exit ${exitCode}) in ${Math.round(performance.now() - started)} ms.`,
+			)
 			if (failure) {
 				reject(failure)
 			} else if (exitCode === 0 || options.allowFailure === true) {

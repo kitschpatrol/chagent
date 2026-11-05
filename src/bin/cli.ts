@@ -16,40 +16,61 @@ import {
 import { defaultModels, defaults } from '../lib/defaults'
 import { agentNames, efforts } from '../lib/types'
 
-const progress = process.stderr.isTTY
-	? spinner({ indicator: 'timer', output: process.stderr })
-	: undefined
-let status = 'Reading repository history.'
+/**
+ * Route library output: a timer on a terminal, plain lines otherwise or when
+ * verbose.
+ */
+function createReporter(verbose: boolean) {
+	const progress =
+		!verbose && process.stderr.isTTY
+			? spinner({ indicator: 'timer', output: process.stderr })
+			: undefined
+	let status = 'Reading repository history.'
 
-function logDetail(...args: unknown[]): void {
-	if (progress === undefined) {
-		console.error(...args)
+	const logDetail = (...args: unknown[]) => {
+		if (progress === undefined) {
+			console.error(...args)
+		}
 	}
-}
 
-function logProblem(...args: unknown[]): void {
-	progress?.clear()
-	console.error(...args)
-	progress?.start(status)
-}
+	const logDebug = (...args: unknown[]) => {
+		if (verbose) {
+			console.error(...args)
+		}
+	}
 
-async function withProgress<T>(work: () => Promise<T>): Promise<T> {
-	progress?.start(status)
-	try {
-		return await work()
-	} finally {
+	const logProblem = (...args: unknown[]) => {
 		progress?.clear()
+		console.error(...args)
+		progress?.start(status)
+	}
+
+	setLogger({
+		...console,
+		debug: logDebug,
+		error: logProblem,
+		info: logDetail,
+		log: logDetail,
+		trace: logDebug,
+		warn: logProblem,
+	})
+
+	return {
+		report(message: string) {
+			status = message
+			progress?.message(message)
+		},
+		async track<T>(work: () => Promise<T>): Promise<T> {
+			progress?.start(status)
+			try {
+				return await work()
+			} finally {
+				progress?.clear()
+			}
+		},
 	}
 }
 
-setLogger({
-	...console,
-	debug: logDetail,
-	error: logProblem,
-	info: logDetail,
-	log: logDetail,
-	warn: logProblem,
-})
 const controller = new AbortController()
 process.once('SIGINT', () => {
 	controller.abort()
@@ -137,6 +158,11 @@ try {
 						description: 'Agent timeout in seconds',
 						type: 'number',
 					})
+					.option('verbose', {
+						default: false,
+						description: 'Log commands, cache decisions, and session details to stderr',
+						type: 'boolean',
+					})
 					.check((args) => {
 						if (
 							args.timeout !== undefined &&
@@ -149,7 +175,8 @@ try {
 					}),
 			async (args) => {
 				// Unset flags stay undefined so repository configuration can apply; the library owns defaults.
-				let plan = await withProgress(async () =>
+				const reporter = createReporter(args.verbose)
+				let plan = await reporter.track(async () =>
 					generateChangelog({
 						agent: args.agent,
 						cache: args.cache,
@@ -159,8 +186,7 @@ try {
 						github: args.github,
 						model: args.model,
 						onProgress(message) {
-							status = message
-							progress?.message(message)
+							reporter.report(message)
 						},
 						rebuild: args.rebuild,
 						signal: controller.signal,

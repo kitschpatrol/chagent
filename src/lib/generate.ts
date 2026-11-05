@@ -6,6 +6,7 @@ import { createAgent } from './agents'
 import { loadConfig, resolveConfig } from './config'
 import { enrichReleaseDates } from './evidence'
 import { generateReleases } from './jobs'
+import { log } from './log'
 import { preparePackage, renderPackage } from './package-plan'
 import { git } from './process'
 import { inspectRepository } from './repository'
@@ -29,7 +30,11 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 		await loadConfig(root, configFile),
 		typeof selected === 'string' ? { ...overrides, agent: selected } : overrides,
 	)
+	log.debug(`Resolved options: ${JSON.stringify(config)}`)
 	const repository = await inspectRepository(root, config)
+	log.debug(
+		`Repository ${root} at ${repository.head}: ${repository.tags.length} reachable tags, ${repository.packages.length} workspace packages.`,
+	)
 	const agent = typeof selected === 'object' ? selected : createAgent(config.agent)
 	const plan: ChangelogPlan = {
 		checkpoints: [],

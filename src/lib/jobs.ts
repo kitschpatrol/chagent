@@ -177,7 +177,12 @@ async function runSession(
 			timeoutMs: options.timeoutMs,
 		},
 	}
+	log.debug(
+		`Starting a ${agent.name} session for ${releases.map(({ id }) => id).join(', ')} with model ${options.model ?? 'default'}, effort ${options.effort}, and a ${options.timeoutMs} ms timeout.`,
+	)
+	const started = performance.now()
 	const response = await agent.generate(request)
+	log.debug(`The ${agent.name} session finished in ${Math.round(performance.now() - started)} ms.`)
 	try {
 		return validateResponse(response, releases)
 	} catch (error) {
@@ -203,6 +208,12 @@ export async function generateReleases(
 	const { options } = context
 	const results = new Map<string, Change[]>()
 	const active = requests.filter((release) => release.evidence.length > 0)
+	for (const release of requests) {
+		log.debug(
+			`${release.id}: ${release.evidence.length} evidence items, range ${release.repository.from ?? 'start of history'}..${release.repository.to}.`,
+		)
+	}
+
 	if (active.length === 0) {
 		return results
 	}
@@ -214,6 +225,7 @@ export async function generateReleases(
 		if (cached === undefined) {
 			pending.push(release)
 		} else {
+			log.debug(`Using the cached draft for ${release.id}.`)
 			results.set(release.id, cached)
 		}
 	}

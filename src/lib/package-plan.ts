@@ -7,6 +7,7 @@ import { hash, readCache } from './cache'
 import { findChangelog, parseChangelog, updateMarkdown } from './changelog'
 import { instructionVersion } from './instructions'
 import { prepareRelease } from './jobs'
+import { log } from './log'
 import { isAncestor } from './process'
 import { hasNodeException, resolveReleases } from './repository'
 
@@ -130,6 +131,9 @@ export async function preparePackage(
 	const mode = content === undefined ? 'initialize' : 'update'
 	const releases = await resolveReleases(repository, pkg, context.options, context.options.release)
 	const missing = missingReleases(releases, content)
+	log.debug(
+		`${pkg.name}: ${releases.length} releases, missing [${missing.map((release) => release.version).join(', ')}], changelog ${file.path}.`,
+	)
 	const parsed = parseChangelog(content ?? '')
 	const draft = parsed.sections.find((section) => section.version === 'Unreleased')
 	const newest = releases.findLast((release) => release.version !== 'Unreleased')

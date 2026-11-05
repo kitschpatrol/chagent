@@ -26,6 +26,7 @@ async function run(...args: string[]): Promise<{ code: number; stderr: string; s
 	})
 }
 
+const WHITESPACE_RUN = /\s+/gv
 const VERSION_REGEX = /\d+\.\d+\.\d+/v
 const HELP_DEFAULTS = [
 	/--agent[^\n]*\[default: codex\]/v,
@@ -151,6 +152,44 @@ describe('cli', () => {
 		expect(result.stdout).toContain('Provide the answer export.')
 		expect(result.stderr).toContain('GitHub enrichment unavailable')
 	})
+
+	it('logs extra detail to stderr only with --verbose', async () => {
+		const root = await createRepository({ 'chagent.config.json': '{"github":false}' })
+		await installCliFixtures(root)
+		const first = await runCommand(process.execPath, [cliPath, '--dry-run', '--no-cache'], {
+			cwd: root,
+		})
+		expect(first.stderr).not.toContain('Running:')
+		expect(first.stderr).not.toContain('Resolved options')
+		const verbose = await runCommand(process.execPath, [cliPath, '--dry-run', '--verbose'], {
+			cwd: root,
+		})
+		expect(verbose.stdout).toContain('Provide the answer export.')
+		expect(verbose.stdout).not.toContain('Running:')
+		// The logger wraps long lines.
+		const details = verbose.stderr.replaceAll(WHITESPACE_RUN, ' ')
+		for (const detail of [
+			'Loaded configuration from',
+			'Resolved options:',
+			'workspace packages',
+			'Running: git',
+			'Running: codex',
+			'Finished codex (exit 0)',
+			'evidence items',
+			'Starting a codex session for .@Unreleased with model default, effort xhigh',
+			'The codex session finished in',
+		]) {
+			expect(details).toContain(detail)
+		}
+
+		const cached = await runCommand(process.execPath, [cliPath, '--dry-run', '--verbose'], {
+			cwd: root,
+		})
+		expect(cached.stderr.replaceAll(WHITESPACE_RUN, ' ')).toContain(
+			'Using the cached draft for .@Unreleased.',
+		)
+		expect(cached.stderr).not.toContain('Running: codex')
+	}, 15_000)
 
 	it('uses the configured timeout unless --timeout explicitly overrides it', async () => {
 		const root = await createRepository({

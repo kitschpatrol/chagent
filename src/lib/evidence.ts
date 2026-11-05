@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { z } from 'zod'
 import type { Evidence, PackageInfo, Release, Repository } from './types'
+import { log } from './log'
 import { git, readBlobs, runCommand } from './process'
 import { isVersionOnlyEdit, LOCKFILE_PATH, manifestAt } from './repository'
 
@@ -388,5 +389,6 @@ export async function enrichWithGithub(
 		diagnostics.push(githubUnavailable(error))
 	}
 
+	log.debug(`Found ${pulls.size} merged pull requests for ${commits.size} commits.`)
 	return [...evidence, ...pulls.values()]
 }

@@ -1,6 +1,7 @@
 import { cosmiconfig } from 'cosmiconfig'
 import { z } from 'zod'
 import { defaults } from './defaults'
+import { log } from './log'
 import { agentNames, efforts } from './types'
 
 const configSchema = z.strictObject({
@@ -54,8 +55,11 @@ export async function loadConfig(root: string, file?: string): Promise<Config> {
 	})
 	const result = file === undefined ? await explorer.search(root) : await explorer.load(file)
 	if (!result) {
+		log.debug('No configuration file found.')
 		return {}
 	}
+
+	log.debug(`Loaded configuration from ${result.filepath}.`)
 
 	const parsed = configSchema.safeParse(result.config)
 	if (!parsed.success) {
