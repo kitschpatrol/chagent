@@ -1,4 +1,5 @@
 export { createAgent } from './agents'
+export type { AmendOptions } from './amend'
 export { amendRelease } from './amend'
 export type { Config } from './config'
 export { defineConfig, loadConfig } from './config'

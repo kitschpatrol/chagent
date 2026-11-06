@@ -250,7 +250,11 @@ export function parseVersion(value: string): ParsedVersion | undefined {
 }
 
 /** Read the version a tag names for a package, using its tag patterns. */
-function tagVersion(tag: string, pkg: PackageInfo, patterns?: string[]): ParsedVersion | undefined {
+export function tagVersion(
+	tag: string,
+	pkg: PackageInfo,
+	patterns?: string[],
+): ParsedVersion | undefined {
 	const templates = patterns ?? ['{name}@{version}', '{name}/v{version}', 'v{version}', '{version}']
 	for (const pattern of templates) {
 		const expanded = pattern.replaceAll('{name}', () => pkg.name)

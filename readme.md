@@ -180,7 +180,7 @@ chagent --dry-run --no-github
 
 `generateChangelog` returns proposed edits, release summaries, diagnostics, and incremental checkpoints. `writeChangelog` verifies the original file contents and Git HEAD before applying edits. It rejects symlink destinations, rolls back a failed series of writes, and leaves the index unchanged.
 
-`previewChangelog(plan)` returns a unified diff. `reviewChangelog(plan, { editor })` provides terminal review and returns an edited plan, or `undefined` when cancelled. `amendRelease(plan)` is the explicit post-bump release integration described below. `setLogger(logger)` enables library logging; library calls are silent by default. Pass `onProgress` to `generateChangelog` to receive short status messages between agent sessions.
+`previewChangelog(plan)` returns a unified diff. `reviewChangelog(plan, { editor })` provides terminal review and returns an edited plan, or `undefined` when cancelled. `amendRelease(plan)` is the explicit post-bump release integration described below. It reads repository configuration as generation does; pass it any `configFile`, `packages`, `exclude`, or `tagPatterns` options you gave `generateChangelog` directly. `setLogger(logger)` enables library logging; library calls are silent by default. Pass `onProgress` to `generateChangelog` to receive short status messages between agent sessions.
 
 Custom providers implement the exported `AgentAdapter` type and can be passed as `agent`. Their `generate(request)` method receives a `GenerationRequest` with one or more `releases` to research together, the local `repositoryRoot`, and run `settings`. Each release identifies its package, scope, mode, Git refs, and a bounded starting context, including a range citation for findings from direct research of the local Git checkout. The method resolves to `{ releases: [{ id, changes }] }`, with every requested release ID exactly once, one of the eight supported categories, and citations from that release's own `evidence`. Give an adapter a stable `cacheKey` to enable reusable draft caching, and change that key when its behavior changes. All adapter results receive the same output validation.
 
@@ -242,7 +242,7 @@ Avoid putting changelogs in bumpp's version-replacement `files` option: it can r
 
 With either approach, a generation error or cancelled review stops bumpp before its commit and tag. Bumpp's already updated version files remain available for correction or retry. The callback requires bumpp 12.3.0 or newer. It works with recursive releases, and with independently versioned packages released from their own directories.
 
-For an existing post-bump workflow, `chagent --amend` explicitly amends an unpublished version-only release commit and updates matching local tags. It checks current remote refs, preserves unrelated staged work and tag annotations, and refuses published releases, ambiguous commits, detached HEAD, and signed tags. Signed tags need manual re-signing; the pre-commit callback avoids that problem. Chagent itself never pushes or publishes.
+For an existing post-bump workflow such as `npm version`, `chagent --amend` explicitly amends an unpublished version-only release commit and updates local tags that match your tag patterns. It checks current remote refs, preserves unrelated staged work and tag annotations, and refuses published releases, ambiguous commits, detached HEAD, and signed tags. Signed tags need manual re-signing; the pre-commit callback avoids that problem. Chagent itself never pushes or publishes.
 
 ### Monorepos
 

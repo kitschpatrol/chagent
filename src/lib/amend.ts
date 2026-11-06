@@ -1,13 +1,32 @@
 import { realpath } from 'node:fs/promises'
 import path from 'node:path'
-import type { ChangelogPlan } from './types'
+import semver from 'semver'
+import type { ChangelogPlan, GenerateOptions } from './types'
+import { loadConfig, resolveConfig } from './config'
 import { git, isAncestor, runCommand } from './process'
-import { inspectRepository, isVersionOnlyChange, LOCKFILE_PATH, manifestAt } from './repository'
+import {
+	inspectRepository,
+	isVersionOnlyChange,
+	LOCKFILE_PATH,
+	manifestAt,
+	tagVersion,
+} from './repository'
 import { writeChangelog } from './write'
+
+/**
+ * How to find the release's packages and tags. Repository configuration applies
+ * as it does to generation, so pass only what generation was passed.
+ */
+export type AmendOptions = Pick<
+	GenerateOptions,
+	'configFile' | 'exclude' | 'packages' | 'tagPatterns'
+>
 
 type Tag = { contents?: string; name: string; object: string }
 const SIGNATURE = /-----BEGIN (?:PGP|SSH) SIGNATURE-----/v
-const RELEASE_MESSAGE = /^(?:release\b|(?:chore|build)(?:\(release\))?:?\s*(?:release\b|v?\d))/iv
+// A bare version is the subject that npm version writes.
+const RELEASE_MESSAGE =
+	/^(?:v?\d+\.\d+\.\d+|release\b|(?:chore|build)(?:\(release\))?:?\s*(?:release\b|v?\d))/iv
 
 async function assertUnpublished(root: string, head: string, tags: Tag[]): Promise<void> {
 	const remotes = await git(root, ['remote'])
@@ -50,7 +69,7 @@ async function assertUnpublished(root: string, head: string, tags: Tag[]): Promi
 	}
 }
 
-async function inspectRelease(root: string, head: string): Promise<Tag[]> {
+async function inspectRelease(root: string, head: string, options: AmendOptions): Promise<Tag[]> {
 	if ((await git(root, ['symbolic-ref', '-q', 'HEAD'], true)) === '') {
 		throw new Error('Amendment requires a checked-out branch.')
 	}
@@ -69,10 +88,12 @@ async function inspectRelease(root: string, head: string): Promise<Tag[]> {
 
 	await assertVersionBump(root, head)
 
-	const repository = await inspectRepository(root)
-	const versions = [repository.rootPackage, ...repository.packages]
-		.map((pkg) => pkg.version)
-		.filter((version) => version !== undefined)
+	const { configFile, ...overrides } = options
+	const { exclude, packages, tagPatterns } = resolveConfig(
+		await loadConfig(root, configFile),
+		overrides,
+	)
+	const repository = await inspectRepository(root, { exclude, packages })
 	const names = await git(root, ['tag', '--points-at', head])
 	const tags: Tag[] = []
 	for (const name of names.split('\n')) {
@@ -80,15 +101,12 @@ async function inspectRelease(root: string, head: string): Promise<Tag[]> {
 			continue
 		}
 
-		if (
-			versions.every(
-				(version) =>
-					name !== version &&
-					name !== `v${version}` &&
-					!name.endsWith(`@${version}`) &&
-					!name.endsWith(`/v${version}`),
-			)
-		) {
+		// A release tag names the version some package now has, as generation reads tags.
+		const released = [repository.rootPackage, ...repository.packages].some((pkg) => {
+			const version = semver.valid(pkg.version)
+			return version !== null && tagVersion(name, pkg, tagPatterns)?.version === version
+		})
+		if (!released) {
 			throw new Error(`HEAD also has an unrelated tag (${name}); refusing to move it.`)
 		}
 
@@ -117,21 +135,24 @@ async function tagContents(root: string, object: string): Promise<string | undef
 }
 
 /** Refuse an ineligible amendment before generation spends an agent session. */
-export async function assertAmendable(cwd: string): Promise<void> {
+export async function assertAmendable(cwd: string, options: AmendOptions = {}): Promise<void> {
 	const root = await realpath(await git(cwd, ['rev-parse', '--show-toplevel']))
-	await inspectRelease(root, await git(root, ['rev-parse', 'HEAD']))
+	await inspectRelease(root, await git(root, ['rev-parse', 'HEAD']), options)
 }
 
 /**
  * Explicitly amend an unpublished version-only release and its matching local
  * tags.
  */
-export async function amendRelease(plan: ChangelogPlan): Promise<string> {
+export async function amendRelease(
+	plan: ChangelogPlan,
+	options: AmendOptions = {},
+): Promise<string> {
 	if ((await git(plan.root, ['rev-parse', 'HEAD'])) !== plan.head) {
 		throw new Error('HEAD changed during generation; refusing to amend.')
 	}
 
-	const tags = await inspectRelease(plan.root, plan.head)
+	const tags = await inspectRelease(plan.root, plan.head, options)
 	const files = await writeChangelog(plan)
 	if (files.length === 0) {
 		return plan.head

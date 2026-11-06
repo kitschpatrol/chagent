@@ -216,7 +216,7 @@ try {
 				}
 
 				if (!args.dryRun && args.amend) {
-					await assertAmendable(args.cwd)
+					await assertAmendable(args.cwd, { configFile: args.config })
 				}
 
 				// Unset flags stay undefined so repository configuration can apply; the library owns defaults.
@@ -258,7 +258,7 @@ try {
 					}
 
 					if (args.amend) {
-						await amendRelease(plan)
+						await amendRelease(plan, { configFile: args.config })
 					} else {
 						await writeChangelog(plan)
 					}

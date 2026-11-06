@@ -213,6 +213,54 @@ describe('release integration', () => {
 		expect(await git(root, ['diff', '--cached', '--name-only'])).toBe('unrelated.txt')
 	})
 
+	it.each(['1.0.1', 'v1.0.1'])(
+		'amends a release committed with the subject %s, as npm version writes it',
+		async (subject) => {
+			const root = await createRepository()
+			await git(root, ['tag', 'v1.0.0'])
+			await writeFiles(root, { 'package.json': bumpedManifest })
+			await commit(root, subject)
+			await git(root, ['tag', 'v1.0.1'])
+			const plan = await generateChangelog({ agent, cwd: root, github: false })
+			const head = await amendRelease(plan)
+			expect(head).not.toBe(plan.head)
+			expect(await git(root, ['rev-parse', 'v1.0.1'])).toBe(head)
+			expect(await git(root, ['show', 'HEAD:changelog.md'])).toContain('Support examples.')
+		},
+	)
+
+	it.each([
+		[
+			'the repository configuration',
+			{ 'chagent.config.json': '{"tagPatterns":["release-{version}"]}' },
+			{},
+		],
+		['the options generation was given', {}, { tagPatterns: ['release-{version}'] }],
+	])('moves a release tag that follows tag patterns from %s', async (_label, files, options) => {
+		const root = await createRepository(files)
+		await git(root, ['tag', 'release-1.0.0'])
+		await writeFiles(root, { 'package.json': bumpedManifest })
+		await commit(root, 'Release: 1.0.1')
+		await git(root, ['tag', 'release-1.0.1'])
+		const plan = await generateChangelog({ agent, cwd: root, github: false, ...options })
+		expect(plan.releases.map((release) => release.tag)).toEqual(['release-1.0.0', 'release-1.0.1'])
+		const head = await amendRelease(plan, options)
+		expect(await git(root, ['rev-parse', 'release-1.0.1'])).toBe(head)
+		expect(await git(root, ['rev-parse', 'release-1.0.0'])).not.toBe(head)
+	})
+
+	it('refuses to move a tag that only default patterns would read as the release', async () => {
+		const root = await createRepository({
+			'chagent.config.json': '{"tagPatterns":["release-{version}"]}',
+		})
+		await git(root, ['tag', 'release-1.0.0'])
+		await writeFiles(root, { 'package.json': bumpedManifest })
+		await commit(root, 'Release: 1.0.1')
+		await git(root, ['tag', 'v1.0.1'])
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		await expect(amendRelease(plan)).rejects.toThrow('unrelated tag (v1.0.1)')
+	})
+
 	it('rejects ordinary commits even when amendment is explicitly requested', async () => {
 		const root = await createRepository()
 		const plan = await generateChangelog({ agent, cwd: root, github: false })
