@@ -254,6 +254,59 @@ describe('release history', () => {
 		expect(evidence[0]?.text).toContain('git show')
 	})
 
+	it('reads two-part version tags as patch zero and links the tags as written', async () => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0'])
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await commit(root, 'Change the answer.')
+		await git(root, ['tag', 'v1.1'])
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		expect(releases).toMatchObject([
+			{ tag: 'v1.0', version: '1.0.0' },
+			{ previousTag: 'v1.0', tag: 'v1.1', version: '1.1.0' },
+		])
+	})
+
+	it.each(['v1', 'v1.x', 'v01.0', 'v1.0.0.0'])('ignores the tag %s', async (tag) => {
+		const root = await createRepository()
+		await git(root, ['tag', tag])
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		expect(releases.map((release) => release.version)).toEqual(['Unreleased'])
+	})
+
+	it('prefers full version tags over two-part tags for the same release', async () => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0'])
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await commit(root, 'Fix the answer.')
+		await git(root, ['tag', 'v1.1.0'])
+		await git(root, ['tag', '--force', 'v1.0'])
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		expect(releases).toMatchObject([
+			{ tag: 'v1.0.0', version: '1.0.0' },
+			{ previousTag: 'v1.0.0', tag: 'v1.1.0', version: '1.1.0' },
+		])
+	})
+
+	it.each([
+		['full', 'v1.0.0', '1.0.0'],
+		['two-part', 'v1.0', '1.0'],
+	])('rejects %s version tags that disagree about a release', async (_label, first, second) => {
+		const root = await createRepository()
+		await git(root, ['tag', first])
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await commit(root, 'Fix the answer.')
+		await git(root, ['tag', second])
+		const repository = await inspectRepository(root)
+		await expect(resolveReleases(repository, repository.rootPackage, {})).rejects.toThrow(
+			'Multiple reachable tags disagree about example 1.0.0.',
+		)
+	})
+
 	it('uses root release tags even when package.json belongs to unrelated tooling', async () => {
 		const root = await createRepository({
 			'package.json': '{"name":"docs-tooling","version":"0.0.0"}',

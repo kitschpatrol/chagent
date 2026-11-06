@@ -17,6 +17,7 @@ export const LOCKFILE_PATH =
 	/(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|deno\.lock|uv\.lock|poetry\.lock|pdm\.lock|Pipfile\.lock|Cargo\.lock|Gemfile\.lock|composer\.lock|go\.sum)$/v
 const TAG_DECORATION = 'tag: refs/tags/'
 const GITHUB_REMOTE = /github\.com[:\/]([^\/]+\/[^\/]+?)(?:\.git)?$/v
+const MAJOR_MINOR = /^\d+\.\d+$/v
 
 const manifestSchema = z.object({
 	dependencies: z.record(z.string(), z.string()).optional(),
@@ -226,7 +227,15 @@ function packageInfo(
 	}
 }
 
-function tagVersion(tag: string, pkg: PackageInfo, patterns?: string[]): string | undefined {
+/**
+ * Read the version a tag names. Two-part versions such as `1.0` name the `.0`
+ * patch release and are marked partial.
+ */
+function tagVersion(
+	tag: string,
+	pkg: PackageInfo,
+	patterns?: string[],
+): undefined | { partial: boolean; version: string } {
 	const templates = patterns ?? ['{name}@{version}', '{name}/v{version}', 'v{version}', '{version}']
 	for (const pattern of templates) {
 		const expanded = pattern.replaceAll('{name}', () => pkg.name)
@@ -238,7 +247,16 @@ function tagVersion(tag: string, pkg: PackageInfo, patterns?: string[]): string 
 		const value = tag.slice(prefix.length, suffix === '' ? undefined : -suffix.length)
 		const version = semver.valid(value)
 		if (version !== null) {
-			return version
+			return { partial: false, version }
+		}
+
+		if (!MAJOR_MINOR.test(value)) {
+			continue
+		}
+
+		const padded = semver.valid(`${value}.0`)
+		if (padded !== null) {
+			return { partial: true, version: padded }
 		}
 	}
 
@@ -487,13 +505,18 @@ async function taggedReleases(
 	pkg: PackageInfo,
 	config: Pick<Config, 'tagPatterns'>,
 ): Promise<Release[]> {
-	const candidates: Array<{ tag: Repository['tags'][number]; version: string }> = []
+	const candidates: Array<{ partial: boolean; tag: Repository['tags'][number]; version: string }> =
+		[]
 	for (const tag of repository.tags) {
-		const version = tagVersion(tag.name, pkg, config.tagPatterns)
-		if (version !== undefined) {
-			candidates.push({ tag, version })
+		const match = tagVersion(tag.name, pkg, config.tagPatterns)
+		if (match !== undefined) {
+			candidates.push({ ...match, tag })
 		}
 	}
+
+	const fullVersions = new Set(
+		candidates.filter((candidate) => !candidate.partial).map((candidate) => candidate.version),
+	)
 
 	const isRoot = pkg.directory === '.'
 	const manifests = isRoot
@@ -504,7 +527,12 @@ async function taggedReleases(
 				candidates.map(({ tag }) => tag.commit),
 			)
 	const releases: Release[] = []
-	for (const { tag, version } of candidates) {
+	for (const { partial, tag, version } of candidates) {
+		// A two-part tag such as v1.0 may float, so a full version tag takes precedence.
+		if (partial && fullVersions.has(version)) {
+			continue
+		}
+
 		if (!isRoot) {
 			const manifest = manifests.get(tag.commit)
 			if (manifest?.version !== undefined && semver.valid(manifest.version) !== version) {
