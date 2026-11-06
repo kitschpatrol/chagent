@@ -177,7 +177,7 @@ describe('cli', () => {
 		)
 		expect(overridden.some((call) => call.name === 'gh')).toBe(true)
 		await expect(readFile(path.join(root, 'changelog.md'))).rejects.toThrow()
-	}, 15_000)
+	})
 
 	it('reports diagnostics during a dry run', async () => {
 		const root = await createRepository({ 'chagent.config.json': '{"cache":false}' })
@@ -232,7 +232,7 @@ describe('cli', () => {
 			'Using the cached draft for .@Unreleased.',
 		)
 		expect(cached.stderr).not.toContain('Running: codex')
-	}, 15_000)
+	})
 
 	it('uses the configured timeout unless --timeout explicitly overrides it', async () => {
 		const root = await createRepository({
@@ -336,7 +336,7 @@ console.log('Process chatter excluded from the output.');
 		child.stdin.write('\u{3}')
 		expect(await exit).toBe(0)
 		expect(output.stdout).toContain('Provide the answer export.')
-	}, 15_000)
+	})
 
 	// Windows has no catchable signal to send a child process.
 	it.skipIf(process.platform === 'win32').each(['SIGINT', 'SIGHUP'] as const)(
@@ -354,7 +354,6 @@ console.log('Process chatter excluded from the output.');
 			expect(output.stderr.indexOf('codex was cancelled.')).toBeGreaterThan(cursorRestored)
 			await expect(readFile(path.join(root, 'changelog.md'))).rejects.toThrow()
 		},
-		15_000,
 	)
 
 	it.skipIf(process.platform === 'win32')(
@@ -387,7 +386,6 @@ setTimeout(() => {}, 60000);
 			expect(await exit).toBeUndefined()
 			expect(child.signalCode).toBe('SIGINT')
 		},
-		15_000,
 	)
 
 	it.skipIf(process.platform === 'win32').each(['SIGINT', 'SIGHUP', 'SIGTERM'] as const)(
@@ -421,6 +419,5 @@ setTimeout(() => {}, 60000);
 				{ interval: 50, timeout: 3000 },
 			)
 		},
-		15_000,
 	)
 })
