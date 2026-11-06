@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-05
+
+### Changed
+
+- **Breaking:** Change `--timeout` from seconds to minutes and replace the configuration and `generateChangelog()` option `timeoutMs` with `timeout`, measured in minutes with a default of 20.
+
+### Fixed
+
+- Fix quoting of editor commands and candidate file paths during interactive review on Windows.
+- Avoid re-researching package releases already recorded in the root changelog when updating a shared-version workspace.
+
+### Documentation
+
+- Add a README warning that the project is under development and unsuitable for general use before version 1.0.
+- Update CLI help, the README options table, and configuration examples for minute-based timeout settings.
+
+### Maintenance
+
+- Exclude `changelog.md` from ESLint and CSpell checks to resolve lint failures.
+- Build before invoking the changelog CLI in the release script so release preparation uses the current implementation.
+
 ## [0.1.0] - 2026-11-05
 
 ### Added
@@ -57,3 +78,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Batch local Git commit, tag, and historical manifest reads to reduce subprocess overhead.
 
 [0.1.0]: https://github.com/kitschpatrol/chagent/releases/tag/v0.1.0
+[0.2.0]: https://github.com/kitschpatrol/chagent/compare/v0.1.0...v0.2.0
