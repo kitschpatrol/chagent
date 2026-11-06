@@ -26,6 +26,15 @@ export type GenerationContext = {
 	repository: Repository
 }
 
+/** What a release request carries besides its range. */
+type ReleaseDetails = Pick<ReleaseRequest, 'mode' | 'styleReference'> & {
+	existingEntries?: string
+	/** A commit the changelog already covers, to research only what follows it. */
+	from?: string
+	/** Describe files outside every workspace package. */
+	onlyRepositoryFiles?: boolean
+}
+
 /**
  * Prepare one release without launching a model, so repository research can be
  * shared.
@@ -34,12 +43,10 @@ export async function prepareRelease(
 	context: GenerationContext,
 	pkg: PackageInfo,
 	release: Release,
-	existingEntries: string,
-	mode: 'initialize' | 'update',
-	from?: string,
-	onlyRepositoryFiles = false,
+	details: ReleaseDetails,
 ): Promise<ReleaseRequest> {
 	const { options, repository } = context
+	const { existingEntries = '', from, mode, onlyRepositoryFiles = false, styleReference } = details
 	options.signal?.throwIfAborted()
 	const excludeDirectories = await excludedPackages(context, pkg, release.ref, onlyRepositoryFiles)
 	const evidence = await collectEvidence(
@@ -65,6 +72,7 @@ export async function prepareRelease(
 			pkg.directory === '.' && repository.packages.length > 0 && options.rootChangelog === 'summary'
 				? 'repository'
 				: 'package',
+		styleReference,
 		version: release.version,
 	}
 }

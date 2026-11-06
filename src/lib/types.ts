@@ -57,6 +57,11 @@ export type ReleaseRequest = {
 		to: string
 	}
 	scope: 'package' | 'repository'
+	/**
+	 * A recent release section of the changelog these entries will join, showing
+	 * the writing conventions to match. It is not evidence.
+	 */
+	styleReference?: string
 	version: string
 }
 

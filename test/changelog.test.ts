@@ -5,6 +5,7 @@ import {
 	mergeChanges,
 	nodeExceptionNote,
 	parseChangelog,
+	styleReference,
 	updateMarkdown,
 } from '../src/lib/changelog'
 
@@ -90,6 +91,30 @@ describe('changelog parsing', () => {
 			'1.1.1',
 			'1.1.0',
 		])
+	})
+})
+
+describe('style reference', () => {
+	it('uses the newest release section that has entries', () => {
+		const content =
+			'# Changelog\n\n## Unreleased\n\n- A draft.\n\n## 1.1.0\n\nNo notable changes.\n\n## 1.0.0\n\n### Added\n\n* added themes (#1)\n\n## 0.9.0\n\n- Older.\n\n[1.0.0]: https://example.com\n'
+		expect(styleReference(parseChangelog(content))).toBe('### Added\n\n* added themes (#1)')
+	})
+
+	it('cuts a long section at a line boundary', () => {
+		const entries = Array.from({ length: 200 }, (_, index) => `- Entry number ${index}.\n`)
+		const sample = styleReference(parseChangelog(`## 1.0.0\n\n${entries.join('')}`))!
+		expect(sample.length).toBeLessThanOrEqual(2000)
+		expect(sample.length).toBeGreaterThan(1900)
+		expect(entries.join('').startsWith(sample + '\n')).toBe(true)
+	})
+
+	it.each([
+		'',
+		'# Changelog\n\n## Unreleased\n\n- A draft.\n',
+		'## 1.0.0\n\nNo notable changes.\n',
+	])('offers nothing for %j', (content) => {
+		expect(styleReference(parseChangelog(content))).toBeUndefined()
 	})
 })
 

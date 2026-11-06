@@ -377,6 +377,27 @@ describe('generation and writing', () => {
 		},
 	)
 
+	it('shows the agent a recent release section as a style reference, except when rebuilding', async () => {
+		const root = await createRepository({
+			'changelog.md':
+				changelogHeader +
+				'\n## Unreleased\n\n- A draft.\n\n## [1.0.0] - 2026-01-01\n\n### Added\n\n* added the first answer (#1)\n',
+		})
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await commit(root, 'Change the answer.')
+		const agent = fixtureAgent()
+		const options = { agent, cache: false, cwd: root, github: false }
+		await generateChangelog(options)
+		expect(agent.generate.mock.calls[0]![0].releases[0]?.styleReference).toBe(
+			'### Added\n\n* added the first answer (#1)',
+		)
+		await generateChangelog({ ...options, rebuild: true })
+		expect(
+			agent.generate.mock.calls[1]![0].releases.map((release) => release.styleReference),
+		).toEqual([undefined, undefined])
+	})
+
 	it('rejects concurrent changes before writing any file', async () => {
 		const root = await createRepository()
 		const plan = await generateChangelog({ agent: fixtureAgent(), cwd: root, github: false })

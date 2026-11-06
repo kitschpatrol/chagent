@@ -12,7 +12,7 @@ import type {
 	ResolvedOptions,
 } from './types'
 import { changelogHash, readCache } from './cache'
-import { findChangelog, parseChangelog, updateMarkdown } from './changelog'
+import { findChangelog, parseChangelog, styleReference, updateMarkdown } from './changelog'
 import { instructionVersion } from './instructions'
 import { prepareRelease } from './jobs'
 import { log } from './log'
@@ -190,7 +190,12 @@ export async function preparePackage(
 			existingBody === undefined
 				? undefined
 				: await incrementalBase(context, file.path, content, release)
-		const request = await prepareRelease(context, pkg, release, existingBody ?? '', mode, from)
+		const request = await prepareRelease(context, pkg, release, {
+			existingEntries: existingBody,
+			from,
+			mode,
+			styleReference: styleReference(parsed),
+		})
 		work.push({ existingBody, release, request, shouldWrite })
 	}
 

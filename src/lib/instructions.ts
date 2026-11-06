@@ -119,6 +119,13 @@ absent because this output will itself become GitHub release notes.
 Do not read existing changelog files, generated release-note files, or GitHub
 release bodies as source material, even when researching the repository directly.
 
+When styleReference is present, it is a recent release section of the changelog
+these entries will join. Match its writing conventions: voice and tense,
+capitalization, terminal punctuation, and how code, issues, and PRs are
+referenced. It is a style sample and nothing more. It describes another release,
+so it is not evidence, and its length and choice of categories say nothing about
+this one.
+
 Before returning, check coverage across behavior/API, compatibility, dependencies,
 documentation, build/test/CI, and distribution. Do not drop a change just because
 its commit is called chore, docs, build, or dependency updates. Return an empty

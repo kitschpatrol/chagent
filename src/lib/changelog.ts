@@ -16,6 +16,8 @@ const WHITESPACE = /\s+/gv
 const TERMINAL_PUNCTUATION = /[.!]$/v
 const NEWLINE = /\r?\n/v
 const BULLET = /^\s*[\-*] /v
+const ENTRY = /^\s*[\-*] /mv
+const STYLE_REFERENCE_LENGTH = 2000
 const CATEGORY_HEADING = /^### /mv
 const SEMVER_LINE = /^.*\[Semantic Versioning\].*(?:\r?\n|$)/mv
 const UNRELEASED_REFERENCE = /^\[unreleased\]:[^\r\n]*(?:\r?\n)?/imv
@@ -119,6 +121,29 @@ export function parseChangelog(content: string): Changelog {
 		newline,
 		sections,
 	}
+}
+
+/**
+ * Pick the newest release section with entries, to show an agent how this
+ * changelog is written. Long sections are cut at a line boundary.
+ */
+export function styleReference({ sections }: Changelog): string | undefined {
+	const section = sections.find(({ body, version }) => version !== 'Unreleased' && ENTRY.test(body))
+	if (section === undefined) {
+		return undefined
+	}
+
+	const lines = section.body.trim().split(LINE_BOUNDARY)
+	let sample = ''
+	for (const line of lines) {
+		if (sample.length + line.length > STYLE_REFERENCE_LENGTH) {
+			break
+		}
+
+		sample += line
+	}
+
+	return sample.trim() === '' ? undefined : sample.trimEnd()
 }
 
 function normalized(description: string): string {

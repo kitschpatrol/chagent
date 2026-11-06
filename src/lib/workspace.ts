@@ -15,6 +15,7 @@ import {
 	LINE_BOUNDARY,
 	noNotableChanges,
 	parseChangelog,
+	styleReference,
 	updateMarkdown,
 } from './changelog'
 import { generateReleases, prepareRelease } from './jobs'
@@ -147,15 +148,13 @@ async function prepareIndependent(
 		(section) => section.version === 'Unreleased',
 	)?.body
 	const from = await incrementalBase(context, file.path, remaining, release)
-	const request = await prepareRelease(
-		context,
-		repository.rootPackage,
-		release,
-		draft ?? '',
-		content === undefined ? 'initialize' : 'update',
+	const request = await prepareRelease(context, repository.rootPackage, release, {
+		existingEntries: draft,
 		from,
-		true,
-	)
+		mode: content === undefined ? 'initialize' : 'update',
+		onlyRepositoryFiles: true,
+		styleReference: styleReference(parseChangelog(content ?? '')),
+	})
 	return { content, file, release, request }
 }
 
