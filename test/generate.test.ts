@@ -384,6 +384,167 @@ describe('generation and writing', () => {
 		},
 	)
 
+	/** Release 1.0.0, then draft one unreleased change without writing it. */
+	async function generatedDraft() {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		const agent = fixtureAgent()
+		const options = { agent, cwd: root, github: false }
+		await writeChangelog(await generateChangelog(options))
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await commit(root, 'Add a second answer.')
+		const draft = await generateChangelog(options)
+		return { agent, draft, options, root }
+	}
+
+	/** Answer the next request with one change for its first release. */
+	function answerOnce(
+		agent: ReturnType<typeof fixtureAgent>,
+		description: string | undefined,
+		sources: (release: GenerationRequest['releases'][number]) => string[],
+	): void {
+		agent.generate.mockImplementationOnce(async (request) => {
+			await Promise.resolve()
+			const [release] = request.releases
+			const changes =
+				description === undefined
+					? []
+					: [
+							{
+								breaking: false,
+								category: 'Added' as const,
+								description,
+								sources: sources(release!),
+							},
+						]
+			return { releases: [{ changes, id: release!.id }] }
+		})
+	}
+
+	it('lets the agent rewrite a draft that only chagent has written', async () => {
+		const { agent, draft, options, root } = await generatedDraft()
+		expect(agent.generate.mock.calls.at(-1)?.[0].releases[0]?.mode).toBe('update')
+		await writeChangelog(draft)
+		await writeFiles(root, { 'index.js': 'export const answer = 44\n' })
+		await commit(root, 'Fix the second answer.')
+		answerOnce(agent, 'Add a second, correct answer.', (release) => [
+			'draft',
+			release.evidence.at(-1)!.id,
+		])
+		const revised = await generateChangelog(options)
+		const request = agent.generate.mock.calls.at(-1)![0].releases[0]!
+		expect(request.mode).toBe('revise')
+		expect(request.existingEntries).toContain('Improve example in Unreleased.')
+		expect(request.repository.from).toBe(draft.head)
+		expect(request.evidence.map((item) => item.kind)).toEqual(['range', 'draft', 'commit'])
+		expect(parseChangelog(revised.files[0]!.after).sections[0]?.body.trim()).toBe(
+			'### Added\n\n- Add a second, correct answer.',
+		)
+		// A revised draft is still chagent's own, so the next run can revise it again.
+		await writeChangelog(revised)
+		await writeFiles(root, { 'index.js': 'export const answer = 45\n' })
+		await commit(root, 'Change the answer again.')
+		await generateChangelog(options)
+		expect(agent.generate.mock.calls.at(-1)?.[0].releases[0]?.mode).toBe('revise')
+	})
+
+	it('only adds to a draft that was edited before it was written', async () => {
+		const { agent, draft, options, root } = await generatedDraft()
+		draft.files[0]!.after = draft.files[0]!.after.replace(
+			'Improve example in Unreleased.',
+			'A reviewed description.',
+		)
+		await writeChangelog(draft)
+		await writeFiles(root, { 'index.js': 'export const answer = 44\n' })
+		await commit(root, 'Fix the second answer.')
+		answerOnce(agent, 'A generated addition.', (release) => [release.evidence[0]!.id])
+		const plan = await generateChangelog(options)
+		const request = agent.generate.mock.calls.at(-1)![0].releases[0]!
+		expect(request.mode).toBe('update')
+		expect(request.repository.from).toBe(draft.head)
+		expect(request.evidence.map((item) => item.kind)).toEqual(['range', 'commit'])
+		expect(parseChangelog(plan.files[0]!.after).sections[0]?.body.trim()).toBe(
+			'### Added\n\n- A generated addition.\n\n### Changed\n\n- A reviewed description.',
+		)
+	})
+
+	it('only adds to a draft that began with handwritten notes', async () => {
+		const root = await createRepository({
+			'changelog.md':
+				changelogHeader +
+				'\n## Unreleased\n\n### Added\n\n- A handwritten note.\n\n## [1.0.0] - 2026-01-01\n\n- First.\n',
+		})
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await commit(root, 'Add a second answer.')
+		const agent = fixtureAgent('Added')
+		const options = { agent, cwd: root, github: false }
+		const first = await generateChangelog(options)
+		await writeChangelog(first)
+		await writeFiles(root, { 'index.js': 'export const answer = 44\n' })
+		await commit(root, 'Fix the second answer.')
+		answerOnce(agent, 'A generated addition.', (release) => [release.evidence[0]!.id])
+		const plan = await generateChangelog(options)
+		const request = agent.generate.mock.calls.at(-1)![0].releases[0]!
+		expect(request.mode).toBe('update')
+		expect(request.repository.from).toBe(first.head)
+		expect(plan.files[0]?.after).toContain(
+			'- A handwritten note.\n- Improve example in Unreleased.\n- A generated addition.\n',
+		)
+	})
+
+	it('rewrites a generated draft into the release that promotes it', async () => {
+		const { agent, draft, options, root } = await generatedDraft()
+		await writeChangelog(draft)
+		await writeFiles(root, { 'index.js': 'export const answer = 44\n' })
+		await commit(root, 'Fix the second answer.')
+		await writeFiles(root, { 'package.json': '{"name":"example","version":"1.1.0"}' })
+		answerOnce(agent, 'Add a second, correct answer.', () => ['draft'])
+		const plan = await generateChangelog(options)
+		const request = agent.generate.mock.calls.at(-1)![0].releases[0]!
+		expect(request).toMatchObject({ mode: 'revise', version: '1.1.0' })
+		const { sections } = parseChangelog(plan.files[0]!.after)
+		expect(sections.map((section) => section.version)).toEqual(['1.1.0', '1.0.0'])
+		expect(sections[0]?.body.trim()).toBe('### Added\n\n- Add a second, correct answer.')
+	})
+
+	it('removes a generated draft when the agent finds that nothing in it still holds', async () => {
+		const { agent, draft, options, root } = await generatedDraft()
+		await writeChangelog(draft)
+		await writeFiles(root, { 'index.js': 'export const answer = 42\n' })
+		await commit(root, 'Remove the second answer.')
+		answerOnce(agent, undefined, () => [])
+		const plan = await generateChangelog(options)
+		expect(agent.generate.mock.calls.at(-1)?.[0].releases[0]?.mode).toBe('revise')
+		expect(parseChangelog(plan.files[0]!.after).sections.map((section) => section.version)).toEqual(
+			['1.0.0'],
+		)
+	})
+
+	it('revises a generated root draft of repository changes in an independent monorepo', async () => {
+		const root = await createRepository({
+			'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',
+			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+			'readme.md': 'One.\n',
+		})
+		await git(root, ['tag', '@example/a@1.0.0'])
+		const agent = fixtureAgent()
+		const options = { agent, cwd: root, github: false }
+		await writeChangelog(await generateChangelog(options))
+		for (const text of ['Two.\n', 'Three.\n']) {
+			await writeFiles(root, { 'readme.md': text })
+			await commit(root, `Rewrite the readme: ${text.trim()}`)
+			await writeChangelog(await generateChangelog(options))
+		}
+
+		const [drafted, revised] = agent.generate.mock.calls
+			.slice(-2)
+			.map(([request]) => request.releases.find((release) => release.id === '.@Unreleased'))
+		expect(drafted?.mode).toBe('update')
+		expect(revised?.mode).toBe('revise')
+		expect(revised?.evidence.map((item) => item.kind)).toEqual(['range', 'draft', 'commit'])
+	})
+
 	it('shows the agent a recent release section as a style reference, except when rebuilding', async () => {
 		const root = await createRepository({
 			'changelog.md':
@@ -431,10 +592,11 @@ describe('generation and writing', () => {
 		})
 		agent.generate.mockClear()
 		agent.cacheKey = undefined
-		await generateChangelog({ agent, cwd: root, github: false })
+		const rechecked = await generateChangelog({ agent, cwd: root, github: false })
 		expect(agent.generate).toHaveBeenCalledOnce()
 		const request = agent.generate.mock.calls[0]![0].releases[0]!
 		expect(request.version).toBe('Unreleased')
+		expect(request.mode).toBe('update')
 		expect(request.existingEntries).toContain('Improve example in Unreleased.')
 		expect(request.repository.from).toBe(await git(root, ['rev-parse', 'v1.0.0']))
 		expect(
@@ -442,6 +604,12 @@ describe('generation and writing', () => {
 				(item) => item.kind === 'commit' && item.text.includes('Fix behavior.'),
 			),
 		).toBe(true)
+		// The draft is still chagent's own, so once it is rechecked, a later run can revise it.
+		await writeChangelog(rechecked)
+		await writeFiles(root, { 'index.js': 'export const answer = 46\n' })
+		await commit(root, 'Fix behavior again.')
+		await generateChangelog({ agent, cwd: root, github: false })
+		expect(agent.generate.mock.calls.at(-1)?.[0].releases[0]?.mode).toBe('revise')
 	})
 
 	it('links a pending release heading before its tag exists', async () => {

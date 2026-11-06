@@ -26,6 +26,13 @@ export type GenerationContext = {
 	repository: Repository
 }
 
+/** Lets a revised entry cite the draft it came from. */
+const draftEvidence: Evidence = {
+	id: 'draft',
+	kind: 'draft',
+	text: 'The existing entries, which describe this release up to repository.from. Cite this ID for entries carried over or rewritten from them.',
+}
+
 /** Check whether a package's changelog is a monorepo's root summary. */
 export function summarizesPackages(context: GenerationContext, pkg: PackageInfo): boolean {
 	return (
@@ -64,6 +71,10 @@ export async function prepareRelease(
 		from === undefined ? release : { ...release, previousRef: from },
 		excludeDirectories,
 	)
+	if (mode === 'revise' && evidence.length > 0) {
+		evidence.splice(1, 0, draftEvidence)
+	}
+
 	return {
 		evidence,
 		existingEntries,

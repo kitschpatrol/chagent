@@ -12,7 +12,7 @@ export function releaseBatches(requests: ReleaseRequest[], limit: number): Relea
 	for (const release of requests) {
 		const minimum = {
 			...release,
-			evidence: release.evidence.filter((item) => item.kind === 'range'),
+			evidence: release.evidence.filter((item) => required(item)),
 		}
 		const length = JSON.stringify(minimum).length + 1
 		if (size + length > limit && batch.length > 0) {
@@ -36,7 +36,7 @@ export function releaseBatches(requests: ReleaseRequest[], limit: number): Relea
 			evidence: [
 				...item.evidence,
 				...researchEvidence(
-					full.get(item.id)!.filter((entry) => entry.kind !== 'range'),
+					full.get(item.id)!.filter((entry) => !required(entry)),
 					allowance + 2,
 				),
 			],
@@ -53,6 +53,11 @@ export function releaseBatches(requests: ReleaseRequest[], limit: number): Relea
 
 		return seeded
 	})
+}
+
+/** Keep what a request cannot do without: its range, and a draft it may cite. */
+function required(item: Evidence): boolean {
+	return item.kind === 'range' || item.kind === 'draft'
 }
 
 /** Bound the starting context; adapters can read the complete range themselves. */

@@ -30,7 +30,7 @@ export type Evidence = {
 	/** Git commits associated with pull-request evidence. */
 	commits?: string[]
 	id: string
-	kind: 'commit' | 'manifest' | 'pull-request' | 'range'
+	kind: 'commit' | 'draft' | 'manifest' | 'pull-request' | 'range'
 	text: string
 }
 
@@ -40,11 +40,20 @@ export type Evidence = {
  */
 export type ReleaseRequest = {
 	evidence: Evidence[]
+	/**
+	 * Entries the changelog already has for this release: text to preserve and
+	 * not repeat, or in `revise` mode, a draft to rewrite.
+	 */
 	existingEntries: string
 	/** Unique and stable across runs; each change set echoes it. */
 	id: string
 	initialRelease: boolean
-	mode: 'initialize' | 'update'
+	/**
+	 * `initialize` writes a changelog from nothing and `update` adds to one. In
+	 * `revise`, the existing entries are an earlier generated draft covering the
+	 * release up to `repository.from`, and the changes returned replace it.
+	 */
+	mode: 'initialize' | 'revise' | 'update'
 	packageName: string
 	/**
 	 * Read-only research context in the local checkout; Git snapshots, not the
@@ -182,6 +191,8 @@ export type FileEdit = {
 type Checkpoint = {
 	baseRef: string
 	contentHash: string
+	/** Whether the draft is entirely generated, so a later run may revise it. */
+	generated: boolean
 	head: string
 	instructionVersion: string
 	path: string

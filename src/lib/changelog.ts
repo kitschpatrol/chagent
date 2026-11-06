@@ -43,6 +43,8 @@ export type SectionEntry = {
 	/** Given for a root summary, whose package links are replaced on every write. */
 	links?: PackageLink[]
 	release: Release
+	/** Replace the draft with these changes instead of adding them to it. */
+	revise?: boolean
 }
 
 type Section = { body: string; end: number; heading: string; start: number; version: string }
@@ -275,16 +277,16 @@ export function packageLinksDiffer(body: string | undefined, links: PackageLink[
 	)
 }
 
-/** Merge new changes into a section's draft and end it with its package links. */
+/**
+ * Merge new changes into a section's draft, or replace a revised draft with
+ * them, and end the section with its package links.
+ */
 function sectionBody(
-	{ changes, existingBody = '', links }: Omit<SectionEntry, 'release'>,
+	{ changes, existingBody = '', links, revise }: SectionEntry,
 	newline: string,
 ): string {
-	const body = mergeChanges(
-		links === undefined ? existingBody : withoutPackageLinks(existingBody),
-		changes,
-		newline,
-	)
+	const draft = links === undefined ? existingBody : withoutPackageLinks(existingBody)
+	const body = mergeChanges(revise === true ? '' : draft, changes, newline)
 	if (links === undefined || links.length === 0) {
 		return body
 	}
@@ -335,11 +337,12 @@ export function updateMarkdown(
 		.filter((section) => section.version !== 'Unreleased')
 		.map((section) => content.slice(section.start, section.end))
 	let draftText = draft === undefined ? '' : content.slice(draft.start, draft.end)
-	for (const { changes, existingBody, links, release } of entries) {
+	for (const entry of entries) {
+		const { existingBody, release } = entry
 		const link = releaseLink(github, release)
 		const title = link === undefined ? release.version : `[${release.version}]`
 		const heading = `## ${title}${release.date === undefined ? '' : ` - ${release.date}`}`
-		let body = sectionBody({ changes, existingBody, links }, newline)
+		let body = sectionBody(entry, newline)
 		if (body.trim() === '') {
 			if (release.version === 'Unreleased') {
 				// A draft left with nothing to say goes away with its last package link.

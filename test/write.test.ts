@@ -98,6 +98,7 @@ describe('writing changelogs', () => {
 		plan.checkpoints.push({
 			baseRef: 'initial',
 			contentHash: 'hash',
+			generated: false,
 			head: plan.head,
 			instructionVersion: 'version',
 			path: file,

@@ -22,9 +22,11 @@ import {
 import { generateReleases, prepareRelease } from './jobs'
 import {
 	incrementalBase,
+	leavesGeneratedDraft,
 	missingPackageSummaries,
 	missingReleases,
 	preparePackage,
+	readCheckpoint,
 	recordCheckpoint,
 	releaseContext,
 	renderPackage,
@@ -36,6 +38,7 @@ import { describedPackages, resolveReleases } from './repository'
 type IndependentPlan = {
 	content?: string
 	draft?: string
+	draftGenerated: boolean
 	file: Awaited<ReturnType<typeof findChangelog>>
 	/** Summaries of the package releases the root does not record yet. */
 	releases: ReleaseRequest[]
@@ -104,13 +107,17 @@ async function prepareIndependent(
 	const base = ancestors.split('\n').find((ref) => releaseRefs.has(ref))
 	const release: Release = { previousRef: base, ref: repository.head, version: 'Unreleased' }
 	const draft = parsed.sections.find((section) => section.version === 'Unreleased')?.body
+	const checkpoint = await readCheckpoint(context, file.path, content)
+	const from = await incrementalBase(context, checkpoint, release)
+	const draftGenerated = checkpoint?.generated === true
 	const request = await prepareRelease(context, repository.rootPackage, release, {
 		...details,
 		existingEntries: draft === undefined ? undefined : withoutPackageLinks(draft),
-		from: await incrementalBase(context, file.path, content, release),
+		from,
+		mode: draft !== undefined && from !== undefined && draftGenerated ? 'revise' : details.mode,
 		onlyRepositoryFiles: true,
 	})
-	return { content, draft, file, releases, unreleased: { release, request } }
+	return { content, draft, draftGenerated, file, releases, unreleased: { release, request } }
 }
 
 /**
@@ -144,8 +151,9 @@ function renderIndependent(
 	const links = summaries
 		.filter((summary) => summary.version === 'Unreleased')
 		.flatMap((summary) => packageLink(repository, summary))
-	if (changes.length > 0 || packageLinksDiffer(draft, links)) {
-		entries.push({ changes, existingBody: draft, links, release: unreleased.release })
+	const revise = unreleased.request.mode === 'revise' && results.has(unreleased.request.id)
+	if (revise || changes.length > 0 || packageLinksDiffer(draft, links)) {
+		entries.push({ changes, existingBody: draft, links, release: unreleased.release, revise })
 	}
 
 	const after = updateMarkdown(content, entries, exception, repository.github)
@@ -153,7 +161,13 @@ function renderIndependent(
 		plan.files.push({ after, before: file.content, path: file.path })
 	}
 
-	recordCheckpoint(context, file.path, after, unreleased.release)
+	recordCheckpoint(
+		context,
+		file.path,
+		after,
+		unreleased.release,
+		leavesGeneratedDraft(entries, prepared.draftGenerated),
+	)
 }
 
 /**

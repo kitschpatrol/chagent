@@ -33,10 +33,18 @@ holds a project's source rather than generated output, its changes belong in the
 changelog like any others.
 
 When mode is initialize, reconstruct this release as part of the project's full
-historical changelog. When mode is update, cover all missing changes in the supplied range. In both modes, review
-every commit, diff, and associated PR before deciding what to include. A changelog
-records the evolution of the project, including maintenance releases; it is not
-just a list of new application features.
+historical changelog. When mode is update, cover all missing changes in the
+supplied range. When mode is revise, the existing entries are your own earlier
+draft of this release, describing it up to repository.from, and the supplied
+range is what has happened since. Return the complete entries for the release as
+it now stands; they replace the draft. Carry over what still holds, fold later
+fixes and refinements into the entries they affect, combine entries that turn
+out to describe one change, and drop an entry only when the range reverts or
+supersedes it. Keep the wording of entries that need no change. In every mode,
+review every commit, diff, and associated PR in the supplied range before
+deciding what to include. A changelog records the evolution of the project,
+including maintenance releases; it is not just a list of new application
+features.
 
 Cover distinct changes to behavior, public APIs and types, CLI flags and output,
 runtime compatibility, installation and distribution, documentation and examples,
@@ -116,12 +124,15 @@ without a bullet prefix, heading, process explanation, or introductory paragraph
 Every change must cite, in sources, at least one evidence ID supplied for its own
 release or the full ID of a commit within that release's range. Prefer the commit
 that made the change, including one found through your own Git research; use the
-release's range ID when no single commit establishes it. Include a PR
+release's range ID when no single commit establishes it. When mode is revise,
+cite the draft evidence ID for an entry carried over or rewritten from the
+existing entries, along with any commit that changed it. Include a PR
 link only when its URL and association are supplied. Do not fabricate links.
 
-Existing entries are provided only for deduplication and preservation. They are
-not independent evidence. Omit changes already expressed by those entries, even
-if you would phrase them differently. GitHub release-note bodies are deliberately
+Existing entries are provided for deduplication and preservation, and when mode
+is revise, as the draft to rewrite. They are not independent evidence. Unless
+mode is revise, omit changes already expressed by those entries, even if you
+would phrase them differently. GitHub release-note bodies are deliberately
 absent because this output will itself become GitHub release notes.
 Do not read existing changelog files, generated release-note files, or GitHub
 release bodies as source material, even when researching the repository directly.
@@ -138,8 +149,9 @@ documentation, build/test/CI, and distribution. Do not drop a change just becaus
 its commit is called chore, docs, build, or dependency updates. Return an empty
 changes array only when the evidence is entirely release-version bookkeeping,
 lockfile-only resolution changes, generated artifacts, formatting noise, or
-changes already covered by existing entries. Do not pad the result with
-unsupported changes.`
+changes already covered by existing entries. When mode is revise, an empty array
+removes the draft, so return one only when nothing in the draft still holds. Do
+not pad the result with unsupported changes.`
 
 /** Invalidates cached drafts whenever the instructions change. */
 export const instructionVersion = hash(instructions)

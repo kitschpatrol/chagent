@@ -61,6 +61,26 @@ describe('evidence batching', () => {
 			}
 		},
 	)
+	it('keeps the draft a revision cites when seed evidence does not fit', () => {
+		const request: ReleaseRequest = {
+			evidence: [
+				{ id: 'range:0', kind: 'range', text: 'Inspect this release.' },
+				{ id: 'draft', kind: 'draft', text: 'The existing entries.' },
+				{ id: 'large', kind: 'commit', text: 'Large commit body. '.repeat(1000) },
+			],
+			existingEntries: '- An earlier entry.',
+			id: '.@Unreleased',
+			initialRelease: false,
+			mode: 'revise',
+			packageName: 'example',
+			repository: { directory: '.', excludeDirectories: [], from: 'before', to: 'head' },
+			scope: 'package',
+			version: 'Unreleased',
+		}
+		const [batch] = releaseBatches([request], 4000)
+		expect(batch?.[0]?.evidence.map((item) => item.id)).toEqual(['range:0', 'draft'])
+	})
+
 	it('keeps the complete Git range available when starting evidence exceeds the budget', () => {
 		const range: Evidence = {
 			id: 'range:before..after',

@@ -30,8 +30,9 @@ import { hasNodeException, resolveReleases } from './repository'
 const checkpointSchema = z.object({
 	baseRef: z.string(),
 	contentHash: z.string(),
+	generated: z.boolean(),
 	head: z.string(),
-	instructionVersion: z.literal(instructionVersion),
+	instructionVersion: z.string(),
 	path: z.string(),
 })
 const HEADING_PREFIX = /^#{1,3}\s+/v
@@ -42,6 +43,8 @@ const ANCHOR_SPACE = /\s/gv
 /** A package's releases and changelog, ready for generation and then rendering. */
 export type PackagePlan = {
 	content?: string
+	/** Whether the checkpoint records the draft as entirely generated. */
+	draftGenerated: boolean
 	exception: boolean
 	file: Awaited<ReturnType<typeof findChangelog>>
 	pkg: PackageInfo
@@ -55,15 +58,18 @@ export type PackagePlan = {
 	}>
 }
 
+type Checkpoint = z.infer<typeof checkpointSchema>
+
 /**
  * Remember what this run covered, so the next one can research only newer
- * commits.
+ * commits, and whether the draft it leaves is entirely generated.
  */
 export function recordCheckpoint(
 	context: Context,
 	file: string,
 	content: string,
-	release?: Release,
+	release: Release | undefined,
+	generated: boolean,
 ): void {
 	if (release === undefined || !context.options.cache) {
 		return
@@ -72,6 +78,7 @@ export function recordCheckpoint(
 	context.plan.checkpoints.push({
 		baseRef: release.previousRef ?? 'initial',
 		contentHash: changelogHash(content),
+		generated,
 		head: context.repository.head,
 		instructionVersion,
 		path: file,
@@ -79,15 +86,14 @@ export function recordCheckpoint(
 }
 
 /**
- * Find the commit a changelog already covers, when its checkpoint is still
- * valid.
+ * Read what the last run recorded about a changelog, when the file still reads
+ * as that run left it.
  */
-export async function incrementalBase(
+export async function readCheckpoint(
 	context: Context,
 	file: string,
 	content: string | undefined,
-	release: Release,
-): Promise<string | undefined> {
+): Promise<Checkpoint | undefined> {
 	if (content === undefined || !context.options.cache) {
 		return undefined
 	}
@@ -95,17 +101,43 @@ export async function incrementalBase(
 	const result = checkpointSchema.safeParse(
 		await readCache(path.join(context.repository.gitDirectory, 'chagent', 'checkpoints'), file),
 	)
+	return result.success && result.data.contentHash === changelogHash(content)
+		? result.data
+		: undefined
+}
+
+/**
+ * Find the commit a release's entries already cover, when the checkpoint
+ * describes the same release.
+ */
+export async function incrementalBase(
+	context: Context,
+	checkpoint: Checkpoint | undefined,
+	release: Release,
+): Promise<string | undefined> {
+	// Changed instructions can read the same commits differently, so they are researched again.
 	if (
-		!result.success ||
-		result.data.contentHash !== changelogHash(content) ||
-		result.data.baseRef !== (release.previousRef ?? 'initial')
+		checkpoint?.instructionVersion !== instructionVersion ||
+		checkpoint.baseRef !== (release.previousRef ?? 'initial')
 	) {
 		return undefined
 	}
 
-	return (await isAncestor(context.repository.root, result.data.head, release.ref))
-		? result.data.head
+	return (await isAncestor(context.repository.root, checkpoint.head, release.ref))
+		? checkpoint.head
 		: undefined
+}
+
+/**
+ * Decide whether the draft a run leaves is entirely generated: one that was
+ * before stays so, and a draft written from nothing or revised becomes so.
+ */
+export function leavesGeneratedDraft(entries: SectionEntry[], previously: boolean): boolean {
+	const draft = entries.find((entry) => entry.release.version === 'Unreleased')
+	return (
+		previously ||
+		(draft !== undefined && (draft.existingBody === undefined || draft.revise === true))
+	)
 }
 
 /** Select the releases newer than anything the changelog already records. */
@@ -144,6 +176,36 @@ export function releaseContext(
 	return pkg.directory === options.releaseDirectory ? options.release : undefined
 }
 
+/** Prepare the request for a release the changelog still needs. */
+async function prepareWork(
+	context: Context,
+	pkg: PackageInfo,
+	release: Release,
+	details: {
+		checkpoint?: Checkpoint
+		existingBody?: string
+		mode: 'initialize' | 'update'
+		styleReference?: string
+	},
+): Promise<PackagePlan['work'][number]> {
+	const { checkpoint, existingBody, mode } = details
+	const from =
+		existingBody === undefined ? undefined : await incrementalBase(context, checkpoint, release)
+	// A draft that only chagent has written can be rewritten in light of what followed it.
+	const revise = from !== undefined && checkpoint?.generated === true
+	const request = await prepareRelease(context, pkg, release, {
+		// A root summary's package links are maintained here, not by the agent.
+		existingEntries:
+			existingBody !== undefined && summarizesPackages(context, pkg)
+				? withoutPackageLinks(existingBody)
+				: existingBody,
+		from,
+		mode: revise ? 'revise' : mode,
+		styleReference: details.styleReference,
+	})
+	return { existingBody, release, request }
+}
+
 /**
  * Resolve a package's releases and prepare requests for those its changelog
  * still needs. Summaries cover those releases alone, or with `allSummaries`,
@@ -170,6 +232,8 @@ export async function preparePackage(
 	)
 	const parsed = parseChangelog(content ?? '')
 	const draft = parsed.sections.find((section) => section.version === 'Unreleased')
+	const checkpoint =
+		draft === undefined ? undefined : await readCheckpoint(context, file.path, content)
 	const newest = releases.findLast((release) => release.version !== 'Unreleased')
 	const draftPromoted = draft !== undefined && newest !== undefined && missing.includes(newest)
 	const work: PackagePlan['work'] = []
@@ -195,26 +259,27 @@ export async function preparePackage(
 		}
 
 		const ownsDraft = draftPromoted ? release === newest : release.version === 'Unreleased'
-		const existingBody = ownsDraft ? draft?.body : undefined
-		const from =
-			existingBody === undefined
-				? undefined
-				: await incrementalBase(context, file.path, content, release)
-		const request = await prepareRelease(context, pkg, release, {
-			// A root summary's package links are maintained here, not by the agent.
-			existingEntries:
-				existingBody !== undefined && summarizesPackages(context, pkg)
-					? withoutPackageLinks(existingBody)
-					: existingBody,
-			from,
-			mode,
-			styleReference: styleReference(parsed),
-		})
-		work.push({ existingBody, release, request })
+		work.push(
+			await prepareWork(context, pkg, release, {
+				checkpoint,
+				existingBody: ownsDraft ? draft?.body : undefined,
+				mode,
+				styleReference: styleReference(parsed),
+			}),
+		)
 	}
 
 	const exception = await hasNodeException(repository, pkg, releases)
-	return { content, exception, file, pkg, releases, summaries, work }
+	return {
+		content,
+		draftGenerated: checkpoint?.generated === true,
+		exception,
+		file,
+		pkg,
+		releases,
+		summaries,
+		work,
+	}
 }
 
 /**
@@ -235,14 +300,17 @@ export function renderPackage(
 	for (const { existingBody, release, request } of work) {
 		const changes = results.get(request.id) ?? []
 		const links = linksFor?.(release)
+		// A revision replaces the draft, even with nothing, once the agent has answered.
+		const revise = request.mode === 'revise' && results.has(request.id)
 		changesByVersion.set(release.version, changes)
 		// A draft is rewritten only for something new, so a formatted one stays as it is.
 		if (
+			revise ||
 			release.version !== 'Unreleased' ||
 			changes.length > 0 ||
 			(links !== undefined && packageLinksDiffer(existingBody, links))
 		) {
-			entries.push({ changes, existingBody, links, release })
+			entries.push({ changes, existingBody, links, release, revise })
 		}
 	}
 
@@ -251,7 +319,13 @@ export function renderPackage(
 		plan.files.push({ after, before: file.content, path: file.path })
 	}
 
-	recordCheckpoint(context, file.path, after, releases.at(-1))
+	recordCheckpoint(
+		context,
+		file.path,
+		after,
+		releases.at(-1),
+		leavesGeneratedDraft(entries, prepared.draftGenerated),
+	)
 	const { sections } = parseChangelog(after)
 	return summaries.map((summary) => ({
 		...summary,

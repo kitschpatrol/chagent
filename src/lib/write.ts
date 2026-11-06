@@ -85,9 +85,12 @@ export async function writeChangelog(plan: ChangelogPlan): Promise<string[]> {
 			try {
 				// Hash the file on disk, since formatting can change more than whitespace.
 				const written = edit === undefined ? undefined : await readOptional(edit.path)
+				// An edit made in review or by a caller is a person's writing, not to be revised.
+				const edited = edit !== undefined && changelogHash(edit.after) !== checkpoint.contentHash
 				await writeCache(path.join(stateDirectory, 'checkpoints'), checkpoint.path, {
 					...checkpoint,
 					contentHash: written === undefined ? checkpoint.contentHash : changelogHash(written),
+					generated: checkpoint.generated && !edited,
 				})
 			} catch {
 				plan.diagnostics.push(

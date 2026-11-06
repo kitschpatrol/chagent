@@ -25,7 +25,7 @@ Run `chagent` in a Git repository to either create a changelog where none previo
 
 Projects can use any language or build system. Version tags supply release boundaries; `package.json` is optional. Codex or Claude inspects historical commits and files directly to decide what belongs in each release.
 
-Between releases, it will add changes under the `Unreleased` heading. Historical release sections retain their original Markdown.
+Between releases, it will add changes under the `Unreleased` heading. A draft that only chagent has written is revised as work continues, so a later fix folds into the entry it affects instead of adding another. A draft you wrote or edited keeps its text and is only added to. Historical release sections retain their original Markdown.
 
 Initialization reconstructs the complete reachable release history, including the initial release's capabilities and meaningful documentation, dependency, compatibility, build, test, and CI changes. Releases containing only maintenance still receive useful descriptions.
 
@@ -182,7 +182,7 @@ chagent --dry-run --no-github
 
 `previewChangelog(plan)` returns a unified diff. `reviewChangelog(plan, { editor })` provides terminal review and returns an edited plan, or `undefined` when cancelled. `amendRelease(plan)` is the explicit post-bump release integration described below. It reads repository configuration as generation does; pass it any `configFile`, `packages`, `exclude`, or `tagPatterns` options you gave `generateChangelog` directly. `setLogger(logger)` enables library logging; library calls are silent by default. Pass `onProgress` to `generateChangelog` to receive short status messages between agent sessions.
 
-Custom providers implement the exported `AgentAdapter` type and can be passed as `agent`. Their `generate(request)` method receives a `GenerationRequest` with one or more `releases` to research together, the local `repositoryRoot`, and run `settings`. Each release identifies its package, scope, mode, Git refs, and a bounded starting context, including a range citation for findings from direct research of the local Git checkout. The method resolves to `{ releases: [{ id, changes }] }`, with every requested release ID exactly once, one of the eight supported categories, and at least one citation for each change: an ID from that release's own `evidence`, or the ID of a commit within its range. Give an adapter a stable `cacheKey` to enable reusable draft caching, and change that key when its behavior changes. All adapter results receive the same output validation.
+Custom providers implement the exported `AgentAdapter` type and can be passed as `agent`. Their `generate(request)` method receives a `GenerationRequest` with one or more `releases` to research together, the local `repositoryRoot`, and run `settings`. Each release identifies its package, scope, mode, Git refs, and a bounded starting context, including a range citation for findings from direct research of the local Git checkout. In `revise` mode, `existingEntries` is an earlier generated draft covering the release up to `repository.from`: the changes returned replace it, and entries carried over cite the `draft` evidence ID. The method resolves to `{ releases: [{ id, changes }] }`, with every requested release ID exactly once, one of the eight supported categories, and at least one citation for each change: an ID from that release's own `evidence`, or the ID of a commit within its range. Give an adapter a stable `cacheKey` to enable reusable draft caching, and change that key when its behavior changes. All adapter results receive the same output validation.
 
 #### API Examples
 
@@ -210,7 +210,7 @@ bumpp --all --execute "chagent -i"
 This runs the following sequence:
 
 1. Bumpp updates the package version.
-2. Chagent moves all existing `Unreleased` notes into the new release section, preserves their text, and adds missing changes. Older release sections remain unchanged.
+2. Chagent moves all existing `Unreleased` notes into the new release section and adds missing changes. Notes you wrote or edited keep their text; a draft that only chagent has written may be revised to fold in what followed. Older release sections remain unchanged.
 3. The `-i` flag displays the diff and lets you edit, accept, or cancel. Saved edits are included when you accept.
 4. Bumpp commits the version and changelog changes together, tags the release, and pushes.
 
@@ -297,7 +297,7 @@ Agents return structured changes with evidence references. Citations are checked
 
 After writing, chagent passes each changed changelog to `fixFile` from the repository's own `@kitschpatrol/shared-config`, or from `@kitschpatrol/prettier-config` when that is all that imports. This formats the whole changelog, including older release sections, and no other files. `--dry-run` and `--interactive` diffs show the text before formatting. A formatting failure leaves the changelog as written and reports a diagnostic. Repositories without either package keep the changelog as written.
 
-Drafts and checkpoints are stored under the checkout's Git directory in `chagent/`. They are disposable and are not committed. Shared session results are validated together and cached separately for each release. Completed sessions can be reused after interruptions; an interrupted session must run again. `--no-cache` disables reuse and persistence. Dry runs can populate the draft cache but do not apply changelog edits.
+Drafts and checkpoints are stored under the checkout's Git directory in `chagent/`. They are disposable and are not committed. A checkpoint records the commit a changelog covers and whether its `Unreleased` draft is entirely generated. While the changelog still reads as chagent left it, the next run researches only newer commits, and a generated draft is revised rather than appended to. Editing the changelog, in review or afterward, ends that: the draft is yours, and chagent only adds to it. Shared session results are validated together and cached separately for each release. Completed sessions can be reused after interruptions; an interrupted session must run again. `--no-cache` disables reuse and persistence. Dry runs can populate the draft cache but do not apply changelog edits.
 
 ## Maintainers
 
