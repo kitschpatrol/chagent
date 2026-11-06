@@ -11,7 +11,7 @@ import type {
 	Repository,
 	ResolvedOptions,
 } from './types'
-import { validateResponse } from './agents'
+import { validateResponse, verifyCitations } from './agents'
 import { releaseBatches } from './batches'
 import { readCache, writeCache } from './cache'
 import { collectEvidence, enrichWithGithub, packageScope } from './evidence'
@@ -190,11 +190,14 @@ function progressMessage(pending: ReleaseRequest[], sessions: number): string {
 
 /**
  * Run one agent session. A long session is worth saving, so invalid output gets
- * one correction request before the run fails.
+ * one correction request before the run fails. Citations are checked against
+ * the releases as they were before their evidence was trimmed to fit, since an
+ * agent researching a range can cite what trimming left out.
  */
 async function runSession(
 	context: GenerationContext,
 	releases: ReleaseRequest[],
+	untrimmed: ReleaseRequest[],
 ): Promise<ChangeSet[]> {
 	const { agent, options, repository } = context
 	const request: GenerationRequest = {
@@ -210,18 +213,20 @@ async function runSession(
 	log.debug(
 		`Starting a ${agent.name} session for ${releases.map(({ id }) => id).join(', ')} with model ${options.model ?? 'default'}, effort ${options.effort}, and a ${options.timeoutMs} ms timeout.`,
 	)
+	const accept = async (value: unknown) =>
+		verifyCitations(repository.root, validateResponse(value, releases), untrimmed)
 	const started = performance.now()
 	const response = await agent.generate(request)
 	log.debug(`The ${agent.name} session finished in ${Math.round(performance.now() - started)} ms.`)
 	try {
-		return validateResponse(response, releases)
+		return await accept(response)
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error)
 		log.warn(`Requesting a correction of invalid agent output. ${message}`)
 		options.onProgress?.('Requesting a correction of invalid agent output.')
 		options.signal?.throwIfAborted()
 		const corrected = await agent.generate({ ...request, repair: { error: message, response } })
-		return validateResponse(corrected, releases)
+		return accept(corrected)
 	}
 }
 
@@ -271,7 +276,11 @@ export async function generateReleases(
 	options.onProgress?.(status)
 	for (const releases of batches) {
 		options.signal?.throwIfAborted()
-		const changeSets = await runSession(context, releases)
+		const changeSets = await runSession(
+			context,
+			releases,
+			releases.map(({ id }) => unabridged.get(id)!),
+		)
 		for (const { changes, id } of changeSets) {
 			results.set(id, changes)
 			await saveChanges(context, unabridged.get(id)!, changes)

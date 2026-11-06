@@ -585,9 +585,81 @@ describe('generation and writing', () => {
 			}
 		})
 		await expect(generateChangelog({ agent, cwd: root, github: false })).rejects.toThrow(
-			'evidence that was not supplied',
+			'cites no supplied evidence or commit in its range: missing',
 		)
 		await expect(readFile(path.join(root, 'changelog.md'))).rejects.toThrow()
+	})
+
+	/** Tag a release, then add commits with long messages. */
+	async function unreleasedCommits(): Promise<{ commits: string[]; root: string }> {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		for (let index = 1; index <= 12; index += 1) {
+			await writeFiles(root, { 'index.js': `export const answer = ${index}\n` })
+			await commit(root, `Change the answer to ${index}. ${'Explain it at length. '.repeat(20)}`)
+		}
+
+		const commits = await git(root, ['rev-list', '--reverse', 'v1.0.0..HEAD'])
+		return { commits: commits.split('\n'), root }
+	}
+
+	/** Describe the Unreleased range by citing sources chosen from its request. */
+	function citingAgent(cite: (release: GenerationRequest['releases'][number]) => string[]) {
+		const agent = fixtureAgent()
+		agent.generate.mockImplementation(async (request) => {
+			await Promise.resolve()
+			const { releases } = describeReleases(request)
+			for (const [index, release] of request.releases.entries()) {
+				if (release.version === 'Unreleased') {
+					releases[index]!.changes[0]!.sources = cite(release)
+				}
+			}
+
+			return { releases }
+		})
+		return agent
+	}
+
+	it('accepts a commit the agent found in the range, though the input budget left it out', async () => {
+		const { commits, root } = await unreleasedCommits()
+		const [oldest] = commits
+		const agent = citingAgent(() => [oldest!])
+		const plan = await generateChangelog({ agent, cwd: root, github: false, maxInputChars: 4000 })
+		expect(agent.generate).toHaveBeenCalledOnce()
+		const supplied = agent.generate.mock.calls[0]![0].releases.flatMap((release) =>
+			release.evidence.map((item) => item.id),
+		)
+		expect(supplied).not.toContain(oldest)
+		expect(plan.releases.find((release) => release.version === 'Unreleased')?.changes).toEqual([
+			expect.objectContaining({ sources: [oldest] }),
+		])
+	})
+
+	it('completes abbreviated commit citations and drops sources that do not hold up', async () => {
+		const { commits, root } = await unreleasedCommits()
+		const newest = commits.at(-1)!
+		const agent = citingAgent(() => [newest.slice(0, 12).toUpperCase(), 'missing', newest])
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		expect(agent.generate).toHaveBeenCalledOnce()
+		expect(plan.releases.find((release) => release.version === 'Unreleased')?.changes).toEqual([
+			expect.objectContaining({ sources: [newest] }),
+		])
+	})
+
+	it('requests a correction when a change cites only a commit from another release', async () => {
+		const { root } = await unreleasedCommits()
+		const first = await git(root, ['rev-parse', 'v1.0.0'])
+		const agent = citingAgent(() => [first])
+		agent.generate.mockImplementationOnce(agent.generate.getMockImplementation()!)
+		agent.generate.mockImplementation(async (request) => {
+			await Promise.resolve()
+			return describeReleases(request)
+		})
+		await generateChangelog({ agent, cwd: root, github: false })
+		expect(agent.generate).toHaveBeenCalledTimes(2)
+		expect(agent.generate.mock.calls[1]![0].repair?.error).toContain(
+			`for .@Unreleased cites no supplied evidence or commit in its range: ${first}`,
+		)
 	})
 
 	it('generates per-package history and a shared-version root summary', async () => {

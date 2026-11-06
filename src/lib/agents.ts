@@ -13,10 +13,11 @@ import type {
 } from './types'
 import { defaultModels } from './defaults'
 import { instructions } from './instructions'
-import { runCommand } from './process'
+import { git, runCommand } from './process'
 import { readOptional } from './repository'
 import { categories } from './types'
 
+const COMMIT_ID = /^[\da-f]{7,64}$/iv
 const CONTROL_CHARACTERS = /\p{Cc}/v
 const HEADING = /^#{1,6}\s/v
 const LIST_MARKER = /^(?:[\-*]|\d+\.)(?:\s+|$)/v
@@ -43,16 +44,8 @@ function normalizeDescription(description: string): string {
 	return description.replaceAll(WHITESPACE_RUN, ' ').trim().replace(LIST_MARKER, '')
 }
 
-function validateChanges(changes: Change[], release: ReleaseRequest): Change[] {
-	const ids = new Set(release.evidence.map((item) => item.id))
+function validateDescriptions(changes: Change[], id: string): Change[] {
 	return changes.map((change) => {
-		const unknown = change.sources.filter((source) => !ids.has(source))
-		if (unknown.length > 0) {
-			throw new Error(
-				`Agent output for ${release.id} cites evidence that was not supplied: ${unknown.join(', ')}.`,
-			)
-		}
-
 		const description = normalizeDescription(change.description)
 		if (
 			description === '' ||
@@ -61,7 +54,7 @@ function validateChanges(changes: Change[], release: ReleaseRequest): Change[] {
 			description.includes('<!--')
 		) {
 			throw new Error(
-				`Agent output for ${release.id} has an empty description, heading, or hidden markup: ${JSON.stringify(change.description)}.`,
+				`Agent output for ${id} has an empty description, heading, or hidden markup: ${JSON.stringify(change.description)}.`,
 			)
 		}
 
@@ -70,8 +63,8 @@ function validateChanges(changes: Change[], release: ReleaseRequest): Change[] {
 }
 
 /**
- * Validate structure, completeness, release identity, and citations before
- * accepting any adapter's output.
+ * Validate structure, completeness, and release identity before accepting any
+ * adapter's output. Citations are checked separately, by `verifyCitations`.
  *
  * @returns The change sets, with descriptions normalized.
  */
@@ -102,9 +95,74 @@ export function validateResponse(value: unknown, releases: ReleaseRequest[]): Ch
 	}
 
 	return response.data.releases.map(({ changes, id }) => ({
-		changes: validateChanges(changes, expected.get(id)!),
+		changes: validateDescriptions(changes, id),
 		id,
 	}))
+}
+
+/** List every commit in a release's range. */
+async function rangeCommits(root: string, { repository }: ReleaseRequest): Promise<string[]> {
+	const { from, to } = repository
+	const commits = await git(root, ['rev-list', from === undefined ? to : `${from}..${to}`])
+	return commits.split('\n')
+}
+
+async function verifyChanges(
+	root: string,
+	release: ReleaseRequest,
+	changes: Change[],
+): Promise<Change[]> {
+	const supplied = new Set(release.evidence.map((item) => item.id))
+	// Read lazily, since agents mostly cite what they were given.
+	let commits: string[] | undefined
+	const verified: Change[] = []
+	for (const change of changes) {
+		const sources = new Set<string>()
+		for (const source of change.sources) {
+			if (supplied.has(source)) {
+				sources.add(source)
+			} else if (COMMIT_ID.test(source)) {
+				commits ??= await rangeCommits(root, release)
+				const matches = commits.filter((commit) => commit.startsWith(source.toLowerCase()))
+				if (matches.length === 1) {
+					sources.add(matches[0]!)
+				}
+			}
+		}
+
+		if (sources.size === 0) {
+			throw new Error(
+				`Agent output for ${release.id} cites no supplied evidence or commit in its range: ${change.sources.join(', ')}. Cite an evidence ID supplied for that release, or the ID of a commit within its range.`,
+			)
+		}
+
+		verified.push({ ...change, sources: [...sources] })
+	}
+
+	return verified
+}
+
+/**
+ * Check citations against Git instead of trusting them. A change may cite
+ * evidence supplied for its release or any commit within that release's range,
+ * which lets an agent cite what its own research found. Abbreviated commit IDs
+ * are completed, and sources that hold up are kept when others do not. Pass the
+ * requested releases with their complete evidence.
+ *
+ * @throws {Error} When a change is left without a source.
+ */
+export async function verifyCitations(
+	root: string,
+	changeSets: ChangeSet[],
+	releases: ReleaseRequest[],
+): Promise<ChangeSet[]> {
+	const requested = new Map(releases.map((release) => [release.id, release]))
+	const verified: ChangeSet[] = []
+	for (const { changes, id } of changeSets) {
+		verified.push({ changes: await verifyChanges(root, requested.get(id)!, changes), id })
+	}
+
+	return verified
 }
 
 function prompt({ releases, repair, repositoryRoot }: GenerationRequest): string {

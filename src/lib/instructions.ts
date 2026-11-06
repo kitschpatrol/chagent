@@ -106,9 +106,10 @@ Put breaking public changes in the appropriate standard category and set breakin
 to true; do not create a Breaking Changes category.
 Descriptions are single-line Markdown suitable for a list item,
 without a bullet prefix, heading, process explanation, or introductory paragraph.
-Every change must cite at least one evidence ID supplied for its own release in
-sources. Prefer the associated commit ID; use that release's range ID for changes
-established through your own Git research. Include a PR
+Every change must cite, in sources, at least one evidence ID supplied for its own
+release or the full ID of a commit within that release's range. Prefer the commit
+that made the change, including one found through your own Git research; use the
+release's range ID when no single commit establishes it. Include a PR
 link only when its URL and association are supplied. Do not fabricate links.
 
 Existing entries are provided only for deduplication and preservation. They are

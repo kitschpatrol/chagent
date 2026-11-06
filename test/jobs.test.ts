@@ -125,7 +125,7 @@ describe('shared history generation', () => {
 		['missing', 'omitted requested releases: .@1.0.1'],
 		['duplicate', 'unknown or duplicate release ids: .@1.0.0'],
 		['unknown', 'unknown or duplicate release ids: not-a-release'],
-		['cross-release', 'for .@1.0.0 cites evidence that was not supplied: range:'],
+		['cross-release', 'for .@1.0.0 cites no supplied evidence or commit in its range: range:'],
 		['malformed', 'does not match the response format'],
 	] as const)('%s release results', (invalid, expectedError) => {
 		async function twoReleases(): Promise<string> {
