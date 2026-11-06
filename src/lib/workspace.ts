@@ -236,12 +236,15 @@ function aggregateShared(
 		return
 	}
 
+	// A package's release belongs to a root release only when it shares that release's commit.
 	const additions = prepared.summaries.map((summary) => ({
 		changes: aggregateChanges(
 			repository,
 			plan.releases.filter(
 				(item) =>
-					item.version === summary.version && !quiet.has(`${item.changelogPath}@${item.version}`),
+					item.version === summary.version &&
+					item.ref === summary.ref &&
+					!quiet.has(`${item.changelogPath}@${item.version}`),
 			),
 		),
 		existingBody: parseChangelog(rootEdit.after).sections.find(
@@ -269,15 +272,15 @@ export async function generateWorkspace(context: Context): Promise<void> {
 	const shared = rootReleases.some((release) => release.version !== 'Unreleased')
 	const rootFile = await findChangelog(repository.root)
 	const rootContent = options.rebuild ? undefined : rootFile.content
-	const rootMissing = shared
-		? new Set(missingReleases(rootReleases, rootContent).map((release) => release.version))
-		: undefined
+	const rootMissing = shared ? missingReleases(rootReleases, rootContent) : undefined
 	const needsPackageHistory =
-		rootMissing === undefined || rootMissing.values().some((version) => version !== 'Unreleased')
+		rootMissing === undefined || rootMissing.some((release) => release.version !== 'Unreleased')
 	const recordedAtRoot = (summary: ReleaseSummary): boolean =>
 		rootMissing === undefined
 			? rootContent !== undefined && missingPackageSummaries([summary], rootContent).length === 0
-			: !rootMissing.has(summary.version)
+			: rootMissing.every(
+					(release) => release.version !== summary.version || release.ref !== summary.ref,
+				)
 	const packages: PackagePlan[] = []
 	for (const pkg of repository.packages) {
 		packages.push(await preparePackage(context, pkg, needsPackageHistory, recordedAtRoot))

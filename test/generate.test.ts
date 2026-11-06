@@ -1,4 +1,4 @@
-import { readFile, symlink, writeFile } from 'node:fs/promises'
+import { readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentAdapter, Category, GenerationRequest } from '../src/lib/types'
@@ -589,6 +589,38 @@ describe('generation and writing', () => {
 		)
 		expect(release?.body).toContain('@example/a 1.0.1')
 		expect(release?.body).not.toContain('@example/b')
+	})
+
+	it('leaves an unrelated package release with the same version out of a root summary', async () => {
+		const root = await createRepository({
+			'packages/a/index.js': 'export const a = 1\n',
+			'packages/a/package.json': '{"name":"@example/a","version":"0.1.0"}',
+			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+		})
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, {
+			'packages/a/index.js': 'export const a = 2\n',
+			'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',
+		})
+		await commit(root, 'Release @example/a 1.0.0.')
+		await git(root, ['tag', '@example/a@1.0.0'])
+		const agent = fixtureAgent()
+		const options = { agent, cache: false, cwd: root, github: false }
+		const plan = await generateChangelog(options)
+		const edit = (file: string) => plan.files.find((item) => item.path === path.join(root, file))
+		expect(edit('packages/a/changelog.md')?.after).toContain('## 1.0.0 - ')
+		const release = parseChangelog(edit('changelog.md')!.after).sections.find(
+			(section) => section.version === '1.0.0',
+		)
+		expect(release?.body).toContain('Improve example in 1.0.0.')
+		expect(release?.body).not.toContain('@example/a')
+		await writeChangelog(plan)
+		await rm(path.join(root, 'changelog.md'))
+		agent.generate.mockClear()
+		await generateChangelog(options)
+		expect(
+			agent.generate.mock.calls.flatMap(([request]) => request.releases.map(({ id }) => id)),
+		).not.toContain('packages/a@1.0.0')
 	})
 
 	it('researches only the bumped release of a shared-version workspace with existing history', async () => {
