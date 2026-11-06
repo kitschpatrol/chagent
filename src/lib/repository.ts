@@ -19,8 +19,8 @@ const TAG_DECORATION = 'tag: refs/tags/'
 const GITHUB_REMOTE = /github\.com[:\/]([^\/]+\/[^\/]+?)(?:\.git)?$/v
 const SHORT_VERSION = /^\d+(?:\.\d+)?$/v
 
-type TagVersion = { precision: number; version: string }
-type TagCandidate = TagVersion & { tag: Repository['tags'][number] }
+type ParsedVersion = { precision: number; version: string }
+type TagCandidate = ParsedVersion & { tag: Repository['tags'][number] }
 
 const manifestSchema = z.object({
 	dependencies: z.record(z.string(), z.string()).optional(),
@@ -231,10 +231,26 @@ function packageInfo(
 }
 
 /**
- * Read the version a tag names, with how many of its parts the tag spells out.
- * Short versions such as `1` or `1.2` name the first release of their series.
+ * Read a version, with how many of its parts are spelled out. Short versions
+ * such as `1` or `1.2` name the first release of their series.
  */
-function tagVersion(tag: string, pkg: PackageInfo, patterns?: string[]): TagVersion | undefined {
+export function parseVersion(value: string): ParsedVersion | undefined {
+	const version = semver.valid(value)
+	if (version !== null) {
+		return { precision: 3, version }
+	}
+
+	if (!SHORT_VERSION.test(value)) {
+		return undefined
+	}
+
+	const parts = value.split('.')
+	const padded = semver.valid([...parts, '0', '0'].slice(0, 3).join('.'))
+	return padded === null ? undefined : { precision: parts.length, version: padded }
+}
+
+/** Read the version a tag names for a package, using its tag patterns. */
+function tagVersion(tag: string, pkg: PackageInfo, patterns?: string[]): ParsedVersion | undefined {
 	const templates = patterns ?? ['{name}@{version}', '{name}/v{version}', 'v{version}', '{version}']
 	for (const pattern of templates) {
 		const expanded = pattern.replaceAll('{name}', () => pkg.name)
@@ -243,25 +259,13 @@ function tagVersion(tag: string, pkg: PackageInfo, patterns?: string[]): TagVers
 			continue
 		}
 
-		const value = tag.slice(prefix.length, suffix === '' ? undefined : -suffix.length)
-		const version = semver.valid(value)
-		if (version !== null) {
-			return { precision: 3, version }
-		}
-
-		if (!SHORT_VERSION.test(value)) {
-			continue
-		}
-
-		const parts = value.split('.')
+		const parsed = parseVersion(
+			tag.slice(prefix.length, suffix === '' ? undefined : -suffix.length),
+		)
 		// Bare numbers are often build or date tags, so default patterns need a v.
-		if (patterns === undefined && parts.length === 1 && !prefix.endsWith('v')) {
-			continue
-		}
-
-		const padded = semver.valid([...parts, '0', '0'].slice(0, 3).join('.'))
-		if (padded !== null) {
-			return { precision: parts.length, version: padded }
+		const bareNumber = parsed?.precision === 1 && patterns === undefined && !prefix.endsWith('v')
+		if (parsed !== undefined && !bareNumber) {
+			return parsed
 		}
 	}
 

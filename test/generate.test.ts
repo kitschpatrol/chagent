@@ -191,6 +191,33 @@ describe('generation and writing', () => {
 		expect(agent.generate).not.toHaveBeenCalled()
 	})
 
+	it.each(['## 1.1', '## v1.1', '## [1.1] - 2026-02-01'])(
+		'updates a changelog that records two-part tags under the heading %s',
+		async (heading) => {
+			const history = `${heading}\n\n- A handwritten change.\n\n${heading.replace('1.1', '1.0')}\n\n- The first release.\n`
+			const root = await createRepository({ 'main.py': 'answer = 1\n' }, false)
+			await git(root, ['tag', 'v1.0'])
+			await writeFiles(root, {
+				'changelog.md': `# Changelog\n\n${history}`,
+				'main.py': 'answer = 2\n',
+			})
+			await commit(root, 'Change the answer.')
+			await git(root, ['tag', 'v1.1'])
+			const agent = fixtureAgent()
+			const options = { agent, cwd: root, github: false }
+			const recorded = await generateChangelog(options)
+			expect(recorded.files).toEqual([])
+			expect(agent.generate).not.toHaveBeenCalled()
+			await writeFiles(root, { 'main.py': 'answer = 3\n' })
+			await commit(root, 'Change the answer again.')
+			const plan = await generateChangelog(options)
+			expect(plan.files[0]?.after).toContain(history)
+			expect(
+				parseChangelog(plan.files[0]!.after).sections.map((section) => section.version),
+			).toEqual(['Unreleased', '1.1.0', '1.0.0'])
+		},
+	)
+
 	it('names unrecognized release headings', async () => {
 		const root = await createRepository({ 'changelog.md': '# Changelog\n\n## Notes\n\n- Text.\n' })
 		await expect(

@@ -28,10 +28,29 @@ describe('changelog parsing', () => {
 		['## [1.0.0] - 2026-01-01'],
 		['### [1.0.0](https://example.com/compare/v0.9.0...v1.0.0) (2026-01-01)'],
 		['### 1.0.0'],
+		['## 1.0'],
+		['## v1.0 - 2026-01-01'],
+		['## [1.0] - 2026-01-01'],
+		['## v1'],
+		['### 1.0'],
 	])('recognizes the release heading %s', (heading) => {
 		const { sections } = parseChangelog(`# Changelog\n\n${heading}\n\n- An entry.\n`)
 		expect(sections.map((section) => section.version)).toEqual(['1.0.0'])
 		expect(sections[0]?.heading.trim()).toBe(heading)
+	})
+
+	it.each(['## 1', '## 2026', '## 01.0', '## vv1.0'])(
+		'does not read the heading %s as a version',
+		(heading) => {
+			const { sections } = parseChangelog(`# Changelog\n\n${heading}\n\n- An entry.\n`)
+			expect(sections.map((section) => section.version)).toEqual([heading.slice(3)])
+		},
+	)
+
+	it('reports a short heading and its full form as the same release', () => {
+		expect(() => parseChangelog('# Changelog\n\n## 1.2\n\n## 1.2.0\n')).toThrow(
+			'Duplicate changelog section: 1.2.0',
+		)
 	})
 
 	it.each([['## Release 1.0.0'], ['# Version 1.0.0 notes'], ['## Upgrading to 2.0.0']])(

@@ -2,7 +2,7 @@ import { lstat, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import semver from 'semver'
 import type { Category, Change, Release } from './types'
-import { readOptional } from './repository'
+import { parseVersion, readOptional } from './repository'
 import { categories } from './types'
 
 export const LINE_BOUNDARY = /(?<=\n)/v
@@ -19,6 +19,7 @@ const BULLET = /^\s*[\-*] /v
 const CATEGORY_HEADING = /^### /mv
 const SEMVER_LINE = /^.*\[Semantic Versioning\].*(?:\r?\n|$)/mv
 const UNRELEASED_REFERENCE = /^\[unreleased\]:[^\r\n]*(?:\r?\n)?/imv
+const V_PREFIX = /^v\d/v
 
 export const changelogHeader =
 	'# Changelog\n\nAll notable changes to this project will be documented in this file.\n\nThe format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),\nand this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).\n'
@@ -328,8 +329,18 @@ function addNodeNote(header: string, newline: string, nodeException: boolean): s
 	return header
 }
 
+/**
+ * Read a heading's version the way default tag patterns read a tag, so `1.2`
+ * and `v1` name the first release of their series and a bare `1` names none.
+ */
 function normalizeVersion(raw: string): string {
-	return raw.toLowerCase() === 'unreleased' ? 'Unreleased' : (semver.valid(raw) ?? raw)
+	if (raw.toLowerCase() === 'unreleased') {
+		return 'Unreleased'
+	}
+
+	const prefixed = V_PREFIX.test(raw)
+	const parsed = parseVersion(prefixed ? raw.slice(1) : raw)
+	return parsed === undefined || (!prefixed && parsed.precision === 1) ? raw : parsed.version
 }
 
 function releaseHeadingVersion(line: string): string | undefined {
