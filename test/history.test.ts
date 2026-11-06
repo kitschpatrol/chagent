@@ -264,10 +264,18 @@ describe('release history', () => {
 		expect(releases.map((release) => release.version)).toEqual(['2.0.0'])
 	})
 
-	it('treats a range of lockfile-only changes as empty', async () => {
-		const root = await createRepository({ 'pnpm-lock.yaml': 'lockfileVersion: 9\n' })
+	it.each([
+		['pnpm-lock.yaml', {}],
+		['uv.lock', { 'pyproject.toml': '[project]\nname = "example"\nversion = "1.0.0"\n' }],
+		['Cargo.lock', { 'Cargo.toml': '[package]\nname = "example"\nversion = "1.0.0"\n' }],
+		['go.sum', { 'go.mod': 'module example.com/example\n' }],
+	])('treats a range of %s-only changes as empty', async (lockfile, manifest) => {
+		const root = await createRepository(
+			{ ...manifest, [lockfile]: 'version = 1\n' },
+			lockfile === 'pnpm-lock.yaml',
+		)
 		await git(root, ['tag', 'v1.0.0'])
-		await writeFiles(root, { 'pnpm-lock.yaml': 'lockfileVersion: 9\n# refreshed\n' })
+		await writeFiles(root, { [lockfile]: 'version = 1\n# refreshed\n' })
 		await commit(root, 'Refresh resolved dependencies.')
 		const repository = await inspectRepository(root)
 		const releases = await resolveReleases(repository, repository.rootPackage, {})

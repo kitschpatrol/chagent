@@ -9,6 +9,7 @@ export default cspellConfig({
 		'lockfiles',
 		'mktag',
 		'ngpgsig',
+		'pipfile',
 		'quotepath',
 		'textconv',
 		'topo',

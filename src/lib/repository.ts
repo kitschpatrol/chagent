@@ -9,9 +9,12 @@ import type { PackageInfo, Release, ReleaseContext, Repository } from './types'
 import { log } from './log'
 import { git, isAncestor, readBlobs } from './process'
 
-/** Matches package manager lockfile paths. */
+/**
+ * Matches package manager lockfile paths. Excludes npm-shrinkwrap.json, which
+ * is published and constrains consumers.
+ */
 export const LOCKFILE_PATH =
-	/(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?)$/v
+	/(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|deno\.lock|uv\.lock|poetry\.lock|pdm\.lock|Pipfile\.lock|Cargo\.lock|Gemfile\.lock|composer\.lock|go\.sum)$/v
 const TAG_DECORATION = 'tag: refs/tags/'
 const GITHUB_REMOTE = /github\.com[:\/]([^\/]+\/[^\/]+?)(?:\.git)?$/v
 
