@@ -1,6 +1,6 @@
 {
 	"name": "@kitschpatrol/chagent",
-	"version": "0.4.0",
+	"version": "0.5.0",
 	"description": "Changelog agent. CLI tool and TypeScript library to generate and update changelogs with a little help from your LLMs.",
 	"keywords": [
 		"changelog",
