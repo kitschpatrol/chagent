@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-05
+
+### Changed
+
+- Exclude recognized JavaScript, Python, Rust, Go, Ruby, PHP, and Deno lockfiles from release evidence, and omit resolution-only dependency changes from generated entries even when committed alongside source changes.
+- Allow otherwise eligible release commits containing Python, Rust, Go, Ruby, PHP, or Deno lockfile updates to pass `--amend` and `amendRelease()` validation.
+
+### Documentation
+
+- Clarify that dependency entries reflect declared version ranges and exclude lockfile-only resolution changes.
+
+### Maintenance
+
+- Expand regression coverage for lockfile-only ranges in pnpm, Python, Rust, and Go repositories and for commits mixing source and lockfile changes.
+
 ## [0.2.0] - 2026-11-05
 
 ### Changed
@@ -79,3 +94,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [0.1.0]: https://github.com/kitschpatrol/chagent/releases/tag/v0.1.0
 [0.2.0]: https://github.com/kitschpatrol/chagent/compare/v0.1.0...v0.2.0
+[0.3.0]: https://github.com/kitschpatrol/chagent/compare/v0.2.0...v0.3.0
