@@ -267,12 +267,21 @@ describe('cli', () => {
 		expect(rootChangelog.stderr).toContain('Invalid values')
 	})
 
-	it('passes --root-changelog to generation', async () => {
-		const root = await createRepository()
+	it.each([
+		[['--root-changelog', 'none', '--skip-package', 'packages/a'], 'no workspace packages remain'],
+		[
+			['--skip-package', 'packages/a', '--skip-package', 'packages/missing'],
+			'"packages/missing" matches no workspace package',
+		],
+	])('passes %j to generation', async (flags, message) => {
+		const root = await createRepository({
+			'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',
+			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+		})
 		await installCliFixtures(root)
-		const { code, stderr } = await run('--cwd', root, '--no-github', '--root-changelog', 'none')
+		const { code, stderr } = await run('--cwd', root, '--no-github', ...flags)
 		expect(code).toBe(1)
-		expect(stderr).toContain('no workspace packages')
+		expect(stderr).toContain(message)
 		await expect(readFile(path.join(root, '.git', 'calls.jsonl'))).rejects.toThrow()
 	})
 

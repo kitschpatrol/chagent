@@ -144,6 +144,7 @@ chagent
 | `--rebuild`             | Reconstruct all history, replacing existing release text                                | `boolean`                                     | `false`                                       |
 | `--amend`               | Amend a verified unpublished release commit and matching local tags                     | `boolean`                                     | `false`                                       |
 | `--root-changelog`      | Monorepo root changelog: a summary of package releases, the root package alone, or none | `"summary"` `"package"` `"none"`              | `summary`                                     |
+| `--skip-package`        | Workspace package directory glob to leave without a changelog; repeatable               | `array`                                       | `none`                                        |
 | `--github`              | Enrich Git evidence using gh when available; disable with --no-github                   | `boolean`                                     | `true`                                        |
 | `--cache`               | Cache drafts and incremental state; disable with --no-cache                             | `boolean`                                     | `true`                                        |
 | `--config`              | Configuration file path                                                                 | `string`                                      | auto-detected from repository root            |
@@ -249,6 +250,8 @@ Workspace declarations in `pnpm-workspace.yaml` or `package.json` determine the 
 
 Use the `rootChangelog` option or `--root-changelog` flag to choose what the root changelog records. The default, `summary`, works as described above. `package` treats the root as a package of its own, for repositories whose main package lives at the root: its changelog describes the root's files and the workspace packages it depends on in full detail, without changes from other packages or links to their releases. `none` writes only the package changelogs. After changing the mode of an existing root changelog, run with `--rebuild` to reconstruct its history in the new form.
 
+Use `skipPackage` directory globs, or repeat `--skip-package`, to leave workspace packages such as documentation sites or examples without changelogs. A skipped package is left out of the root changelog, and its changes are not counted among the root's own, but packages that depend on it still include its relevant changes. To count a directory's changes as the root's instead, `exclude` it from workspace discovery. A pattern that matches no workspace package is an error.
+
 For other monorepo layouts, configure `packages` directory globs. These directories do not need npm manifests; their Git tags identify releases, using the directory basename as the package name.
 
 Shared-version repositories use repository versions at the root. Independently versioned repositories use package-qualified headings such as `@example/package@1.2.0`. Repository infrastructure changes appear in the root's `Unreleased` section. Explicit workspace dependencies contribute relevant source context to dependent packages. Dependency and tooling maintenance belongs under `Maintenance`. `build`, `coverage`, and `dist` directories at the top of a package count as generated output and are excluded, so a package named `packages/build` is still treated as source.
@@ -278,7 +281,7 @@ Importing `defineConfig` requires chagent in the repository's own dependencies. 
 
 Also supported: `chagent.config.mjs`, `chagent.config.js`, `chagent.config.json`, or a `chagent` key in `package.json`. CLI flags override configured values. `--config` selects a specific file.
 
-Use `packages` and `exclude` directory globs to customize workspace discovery. Use `tagPatterns` to select unusual release tag conventions. Templates support `{name}` and `{version}`; defaults recognize `v1.2.3`, `1.2.3`, `@scope/package@1.2.3`, and `@scope/package/v1.2.3`.
+Use `packages` and `exclude` directory globs to customize workspace discovery, and `skipPackage` to leave discovered packages without changelogs. Use `tagPatterns` to select unusual release tag conventions. Templates support `{name}` and `{version}`; defaults recognize `v1.2.3`, `1.2.3`, `@scope/package@1.2.3`, and `@scope/package/v1.2.3`.
 
 ## Background
 

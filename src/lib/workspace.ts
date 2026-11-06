@@ -28,7 +28,7 @@ import {
 	renderPackage,
 } from './package-plan'
 import { git } from './process'
-import { resolveReleases } from './repository'
+import { describedPackages, resolveReleases } from './repository'
 import { categories } from './types'
 
 type IndependentPlan = {
@@ -282,7 +282,7 @@ export async function generateWorkspace(context: Context): Promise<void> {
 					(release) => release.version !== summary.version || release.ref !== summary.ref,
 				)
 	const packages: PackagePlan[] = []
-	for (const pkg of repository.packages) {
+	for (const pkg of describedPackages(repository)) {
 		packages.push(await preparePackage(context, pkg, needsPackageHistory, recordedAtRoot))
 	}
 

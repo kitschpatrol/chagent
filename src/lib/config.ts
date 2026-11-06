@@ -20,6 +20,8 @@ const configSchema = z.strictObject({
 	 * the root package's own changes, or nothing.
 	 */
 	rootChangelog: z.enum(rootChangelogs).optional(),
+	/** Workspace package directory globs that get no changelog of their own. */
+	skipPackage: z.array(z.string()).optional(),
 	/** Templates containing {version} and optionally {name}. */
 	tagPatterns: z.array(z.string().includes('{version}')).optional(),
 	/** Minutes each agent session may run. */

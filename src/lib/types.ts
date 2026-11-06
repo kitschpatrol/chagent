@@ -134,6 +134,11 @@ export type ResolvedOptions = Omit<ResolvedConfig, 'agent'> & {
 export type PackageInfo = {
 	directory: string
 	name: string
+	/**
+	 * Matched by skipPackage: still a package boundary and dependency, but
+	 * without a changelog.
+	 */
+	skipped?: boolean
 	version?: string
 }
 

@@ -164,6 +164,13 @@ try {
 							'Monorepo root changelog: a summary of package releases, the root package alone, or none',
 						type: 'string',
 					})
+					.option('skip-package', {
+						array: true,
+						defaultDescription: 'none',
+						description:
+							'Workspace package directory glob to leave without a changelog; repeatable',
+						type: 'string',
+					})
 					.option('github', {
 						defaultDescription: String(defaults.github),
 						description: 'Enrich Git evidence using gh when available; disable with --no-github',
@@ -229,6 +236,7 @@ try {
 						rebuild: args.rebuild,
 						rootChangelog: args.rootChangelog,
 						signal: controller.signal,
+						skipPackage: args.skipPackage,
 						timeout: args.timeout,
 					}),
 				)

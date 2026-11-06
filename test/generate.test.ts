@@ -744,12 +744,93 @@ describe('generation and writing', () => {
 		).toEqual(['@example/a'])
 	})
 
-	it('refuses to leave out the root changelog without workspace packages', async () => {
-		const root = await createRepository()
+	it.each([
+		['no workspace packages', {}, []],
+		[
+			'only skipped packages',
+			{
+				'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',
+				'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+			},
+			['packages/*'],
+		],
+	])(
+		'refuses to leave out the root changelog with %s',
+		async (_label, files: Record<string, string>, skipPackage: string[]) => {
+			const root = await createRepository(files)
+			const agent = fixtureAgent()
+			await expect(
+				generateChangelog({ agent, cwd: root, github: false, rootChangelog: 'none', skipPackage }),
+			).rejects.toThrow('no workspace packages remain')
+			expect(agent.generate).not.toHaveBeenCalled()
+		},
+	)
+
+	it.each([
+		['shared', ['v1.0.0']],
+		['independent', ['@example/a@1.0.0', '@example/internal@1.0.0']],
+	])(
+		'skips a package changelog with %s versions while dependents keep its changes',
+		async (_label, tags) => {
+			const root = await createRepository({
+				'packages/a/package.json': JSON.stringify({
+					dependencies: { '@example/internal': 'workspace:*' },
+					name: '@example/a',
+					version: '1.0.0',
+				}),
+				'packages/internal/index.js': 'export const internal = 1\n',
+				'packages/internal/package.json': '{"name":"@example/internal","version":"1.0.0"}',
+				'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+			})
+			for (const tag of tags) {
+				await git(root, ['tag', tag])
+			}
+
+			await writeFiles(root, { 'packages/internal/index.js': 'export const internal = 2\n' })
+			await commit(root, 'Improve the internal package.')
+			await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+			await commit(root, 'Change the answer.')
+			const agent = fixtureAgent()
+			const plan = await generateChangelog({
+				agent,
+				cwd: root,
+				github: false,
+				skipPackage: ['packages/internal'],
+			})
+			const requests = agent.generate.mock.calls.flatMap(([request]) => request.releases)
+			const evidence = (id: string) =>
+				requests
+					.find((release) => release.id === id)!
+					.evidence.map((item) => item.text)
+					.join('\n')
+			expect(evidence('packages/a@Unreleased')).toContain('Improve the internal package.')
+			expect(evidence('.@Unreleased')).toContain('Change the answer.')
+			expect(evidence('.@Unreleased')).not.toContain('Improve the internal package.')
+			expect(requests.some((release) => release.packageName === '@example/internal')).toBe(false)
+			expect(plan.files.map((file) => path.relative(root, file.path)).toSorted()).toEqual([
+				'changelog.md',
+				'packages/a/changelog.md',
+			])
+			expect(
+				plan.files.find((file) => file.path === path.join(root, 'changelog.md'))?.after,
+			).not.toContain('@example/internal')
+		},
+	)
+
+	it('names a skipPackage pattern that matches no workspace package', async () => {
+		const root = await createRepository({
+			'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',
+			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+		})
 		const agent = fixtureAgent()
 		await expect(
-			generateChangelog({ agent, cwd: root, github: false, rootChangelog: 'none' }),
-		).rejects.toThrow('no workspace packages')
+			generateChangelog({
+				agent,
+				cwd: root,
+				github: false,
+				skipPackage: ['packages/a', 'packages/missing'],
+			}),
+		).rejects.toThrow('skipPackage pattern "packages/missing" matches no workspace package')
 		expect(agent.generate).not.toHaveBeenCalled()
 	})
 

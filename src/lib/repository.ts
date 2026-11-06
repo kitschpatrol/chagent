@@ -184,7 +184,7 @@ async function reachableTags(root: string, head: string): Promise<Repository['ta
  */
 export async function inspectRepository(
 	cwd: string,
-	config: Pick<Config, 'exclude' | 'packages'> = {},
+	config: Pick<Config, 'exclude' | 'packages' | 'skipPackage'> = {},
 ): Promise<Repository> {
 	const gitRoot = await git(cwd, ['rev-parse', '--show-toplevel'])
 	const root = await realpath(gitRoot)
@@ -379,28 +379,16 @@ function pnpmWorkspaceGlobs(text: string): string[] | undefined {
 	return workspace.data?.packages
 }
 
-async function workspacePackages(
+/** Find directories matching globs, as POSIX paths relative to the root. */
+async function matchDirectories(
 	root: string,
-	manifest: Manifest | undefined,
-	config: Pick<Config, 'exclude' | 'packages'>,
-): Promise<PackageInfo[]> {
-	let patterns = Array.isArray(manifest?.workspaces)
-		? manifest.workspaces
-		: (manifest?.workspaces?.packages ?? [])
-	const workspaceText = await readOptional(path.join(root, 'pnpm-workspace.yaml'))
-	if (workspaceText !== undefined) {
-		patterns = pnpmWorkspaceGlobs(workspaceText) ?? patterns
-	}
-
-	patterns = config.packages ?? patterns
+	patterns: string[],
+	exclude: string[] = [],
+): Promise<string[]> {
 	const directories: string[] = []
-	const positive = patterns.filter((pattern) => !pattern.startsWith('!'))
-	const negative = patterns
-		.filter((pattern) => pattern.startsWith('!'))
-		.map((pattern) => pattern.slice(1))
-	const matches = glob(positive, {
+	const matches = glob(patterns, {
 		cwd: root,
-		exclude: ['**/node_modules/**', '**/.git/**', ...negative, ...(config.exclude ?? [])],
+		exclude: ['**/node_modules/**', '**/.git/**', ...exclude],
 		withFileTypes: true,
 	})
 	for await (const entry of matches) {
@@ -412,6 +400,58 @@ async function workspacePackages(
 			path.relative(root, path.join(entry.parentPath, entry.name)).split(path.sep).join('/'),
 		)
 	}
+
+	return directories
+}
+
+/** Mark the packages that remain boundaries but get no changelog. */
+async function markSkipped(
+	root: string,
+	packages: PackageInfo[],
+	patterns: string[],
+): Promise<PackageInfo[]> {
+	const skipped = new Set<string>()
+	for (const pattern of patterns) {
+		const directories = await matchDirectories(root, [pattern])
+		const matches = directories.filter((directory) =>
+			packages.some((pkg) => pkg.directory === directory),
+		)
+		if (matches.length === 0) {
+			throw new Error(
+				`skipPackage pattern "${pattern}" matches no workspace package directory. Use a directory glob relative to the repository root, such as "packages/docs"; rootChangelog controls the root changelog.`,
+			)
+		}
+
+		for (const directory of matches) {
+			skipped.add(directory)
+		}
+	}
+
+	return packages.map((pkg) => (skipped.has(pkg.directory) ? { ...pkg, skipped: true } : pkg))
+}
+
+async function workspacePackages(
+	root: string,
+	manifest: Manifest | undefined,
+	config: Pick<Config, 'exclude' | 'packages' | 'skipPackage'>,
+): Promise<PackageInfo[]> {
+	let patterns = Array.isArray(manifest?.workspaces)
+		? manifest.workspaces
+		: (manifest?.workspaces?.packages ?? [])
+	const workspaceText = await readOptional(path.join(root, 'pnpm-workspace.yaml'))
+	if (workspaceText !== undefined) {
+		patterns = pnpmWorkspaceGlobs(workspaceText) ?? patterns
+	}
+
+	patterns = config.packages ?? patterns
+	const positive = patterns.filter((pattern) => !pattern.startsWith('!'))
+	const negative = patterns
+		.filter((pattern) => pattern.startsWith('!'))
+		.map((pattern) => pattern.slice(1))
+	const directories = await matchDirectories(root, positive, [
+		...negative,
+		...(config.exclude ?? []),
+	])
 
 	const packages: PackageInfo[] = []
 	for (const directory of directories.toSorted()) {
@@ -434,7 +474,12 @@ async function workspacePackages(
 		)
 	}
 
-	return packages
+	return markSkipped(root, packages, config.skipPackage ?? [])
+}
+
+/** Select the workspace packages that get changelogs of their own. */
+export function describedPackages(repository: Repository): PackageInfo[] {
+	return repository.packages.filter((pkg) => pkg.skipped !== true)
 }
 
 async function taggedReleases(

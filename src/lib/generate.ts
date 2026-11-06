@@ -13,7 +13,7 @@ import { generateReleases } from './jobs'
 import { log } from './log'
 import { preparePackage, renderPackage } from './package-plan'
 import { git } from './process'
-import { inspectRepository } from './repository'
+import { describedPackages, inspectRepository } from './repository'
 import { generateWorkspace } from './workspace'
 
 /**
@@ -50,9 +50,9 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 	log.debug(
 		`Repository ${root} at ${repository.head}: ${repository.tags.length} reachable tags, ${repository.packages.length} workspace packages.`,
 	)
-	if (config.rootChangelog === 'none' && repository.packages.length === 0) {
+	if (config.rootChangelog === 'none' && describedPackages(repository).length === 0) {
 		throw new Error(
-			'The root changelog is set to "none", but this repository has no workspace packages, so there is no changelog to generate. Choose another root changelog mode or configure packages.',
+			'The root changelog is set to "none", but no workspace packages remain to describe, so there is no changelog to generate. Choose another root changelog mode, or configure packages that are not skipped.',
 		)
 	}
 
@@ -104,8 +104,8 @@ async function generatePackages(context: Context): Promise<void> {
 	const { options, plan, repository } = context
 	const packages =
 		options.rootChangelog === 'none'
-			? repository.packages
-			: [repository.rootPackage, ...repository.packages]
+			? describedPackages(repository)
+			: [repository.rootPackage, ...describedPackages(repository)]
 	const prepared: PackagePlan[] = []
 	for (const pkg of packages) {
 		prepared.push(await preparePackage(context, pkg))

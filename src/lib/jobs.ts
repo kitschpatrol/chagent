@@ -71,8 +71,8 @@ export async function prepareRelease(
 
 /**
  * Select the package directories a release leaves out: every package when
- * describing repository files alone, or, when the root is a package itself,
- * those it does not depend on.
+ * describing repository files alone, skipped packages in a whole-repository
+ * summary, or, when the root is a package itself, those it does not depend on.
  */
 async function excludedPackages(
 	context: GenerationContext,
@@ -86,8 +86,12 @@ async function excludedPackages(
 		return directories
 	}
 
-	if (pkg.directory !== '.' || options.rootChangelog !== 'package') {
+	if (pkg.directory !== '.') {
 		return []
+	}
+
+	if (options.rootChangelog === 'summary') {
+		return repository.packages.filter((item) => item.skipped === true).map((item) => item.directory)
 	}
 
 	const scope = new Set(await packageScope(repository, pkg, ref))
