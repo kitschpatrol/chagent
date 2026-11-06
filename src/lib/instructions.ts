@@ -39,7 +39,11 @@ runtime compatibility, installation and distribution, documentation and examples
 dependencies, builds, tests, CI, and release tooling. Include meaningful maintenance
 even when it is the only change in a release. Group routine runtime dependency
 updates into a useful entry, and group development dependency/tooling refreshes
-instead of listing every version. Identify important packages or migrations when
+instead of listing every version. A dependency change is a change to a declared
+requirement, such as a version range in a manifest, workspace catalog, or
+override. Lockfiles only record resolved versions: omit refreshed resolutions and
+transitive updates that appear only in a lockfile, even when the same commit
+changes other files. Identify important packages or migrations when
 the evidence supports them. Classify dependency and tooling changes by their
 actual impact: fixing runtime compatibility for consumers is Fixed, while fixing
 compatibility of contributor tooling alone is Maintenance. Documentation
@@ -114,8 +118,9 @@ Before returning, check coverage across behavior/API, compatibility, dependencie
 documentation, build/test/CI, and distribution. Do not drop a change just because
 its commit is called chore, docs, build, or dependency updates. Return an empty
 changes array only when the evidence is entirely release-version bookkeeping,
-generated artifacts, formatting noise, or changes already covered by existing
-entries. Do not pad the result with unsupported changes.`
+lockfile-only resolution changes, generated artifacts, formatting noise, or
+changes already covered by existing entries. Do not pad the result with
+unsupported changes.`
 
 /** Invalidates cached drafts whenever the instructions change. */
 export const instructionVersion = hash(instructions)

@@ -11,13 +11,16 @@ const GENERATED_ANYWHERE = /(?:^|\/)(?:changelog(?:\.md)?$|node_modules(?:\/|$))
 
 /**
  * Generated output lives at the top of a package, so `packages/build` and
- * `src/dist` remain source.
+ * `src/dist` remain source. Lockfiles record resolved versions, not declared
+ * dependency ranges.
  */
 function ignored(file: string, packages: PackageInfo[]): boolean {
 	// Packages are sorted by directory, so the last match is the most deeply nested owner.
 	const owner = packages.findLast(({ directory }) => file.startsWith(`${directory}/`))
 	const relative = owner === undefined ? file : file.slice(owner.directory.length + 1)
-	return GENERATED_ANYWHERE.test(file) || GENERATED_DIRECTORY.test(relative)
+	return (
+		LOCKFILE_PATH.test(file) || GENERATED_ANYWHERE.test(file) || GENERATED_DIRECTORY.test(relative)
+	)
 }
 
 async function scopes(repository: Repository, pkg: PackageInfo, ref: string): Promise<string[]> {
@@ -59,20 +62,11 @@ function manifestObjects(files: string[], before: string, after: string): string
 }
 
 function hasSourceChanges(files: string[], commit: string, blobs: Map<string, string>): boolean {
-	for (const file of files) {
-		if (LOCKFILE_PATH.test(file)) {
-			continue
-		}
-
-		if (
+	return files.some(
+		(file) =>
 			!isManifest(file) ||
-			!isVersionOnlyEdit(blobs.get(`${commit}^:${file}`), blobs.get(`${commit}:${file}`))
-		) {
-			return true
-		}
-	}
-
-	return files.length > 0 && files.every((file) => LOCKFILE_PATH.test(file))
+			!isVersionOnlyEdit(blobs.get(`${commit}^:${file}`), blobs.get(`${commit}:${file}`)),
+	)
 }
 
 type CommitRecord = { files: string[]; id: string; message: string }

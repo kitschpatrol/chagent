@@ -6,6 +6,7 @@ export default cspellConfig({
 		'chagent',
 		'dont',
 		'gpgsign',
+		'lockfiles',
 		'mktag',
 		'ngpgsig',
 		'quotepath',

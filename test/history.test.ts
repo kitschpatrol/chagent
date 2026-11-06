@@ -264,20 +264,33 @@ describe('release history', () => {
 		expect(releases.map((release) => release.version)).toEqual(['2.0.0'])
 	})
 
-	it('includes lockfile-only maintenance without supplying the generated lockfile body', async () => {
+	it('treats a range of lockfile-only changes as empty', async () => {
 		const root = await createRepository({ 'pnpm-lock.yaml': 'lockfileVersion: 9\n' })
 		await git(root, ['tag', 'v1.0.0'])
-		await writeFiles(root, {
-			'pnpm-lock.yaml': 'lockfileVersion: 9\n# generated-lockfile-sentinel\n',
-		})
+		await writeFiles(root, { 'pnpm-lock.yaml': 'lockfileVersion: 9\n# refreshed\n' })
 		await commit(root, 'Refresh resolved dependencies.')
 		const repository = await inspectRepository(root)
 		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		expect(await collectEvidence(repository, repository.rootPackage, releases.at(-1)!)).toEqual([])
+	})
+
+	it('drops lockfile-only commits and omits lockfiles from listed commit files', async () => {
+		const root = await createRepository({ 'pnpm-lock.yaml': 'lockfileVersion: 9\n' })
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'pnpm-lock.yaml': 'lockfileVersion: 9\n# refreshed\n' })
+		await commit(root, 'Refresh resolved dependencies.')
+		await writeFiles(root, {
+			'index.js': 'export const answer = 43\n',
+			'pnpm-lock.yaml': 'lockfileVersion: 9\n# refreshed again\n',
+		})
+		await commit(root, 'Change the answer.')
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
 		const evidence = await collectEvidence(repository, repository.rootPackage, releases.at(-1)!)
-		expect(evidence.find((item) => item.kind === 'commit')?.text).toContain(
-			'Refresh resolved dependencies.',
-		)
-		expect(evidence.some((item) => item.text.includes('generated-lockfile-sentinel'))).toBe(false)
+		const commits = evidence.filter((item) => item.kind === 'commit')
+		expect(commits).toHaveLength(1)
+		expect(commits[0]?.text).toContain('Change the answer.')
+		expect(commits[0]?.text).not.toContain('pnpm-lock.yaml')
 	})
 
 	it('keeps manifest and lockfile release bookkeeping out of an otherwise empty range', async () => {
