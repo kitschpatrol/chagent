@@ -14,8 +14,10 @@ export const categories = [
 export type Category = (typeof categories)[number]
 export const agentNames = ['codex', 'claude'] as const
 export const efforts = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+export const rootChangelogs = ['summary', 'package', 'none'] as const
 export type AgentName = (typeof agentNames)[number]
 export type Effort = (typeof efforts)[number]
+export type RootChangelog = (typeof rootChangelogs)[number]
 
 export type Change = {
 	breaking: boolean

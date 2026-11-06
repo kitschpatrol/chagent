@@ -14,7 +14,7 @@ import type {
 import { validateResponse } from './agents'
 import { releaseBatches } from './batches'
 import { readCache, writeCache } from './cache'
-import { collectEvidence, enrichWithGithub } from './evidence'
+import { collectEvidence, enrichWithGithub, packageScope } from './evidence'
 import { instructionVersion } from './instructions'
 import { log } from './log'
 
@@ -41,9 +41,7 @@ export async function prepareRelease(
 ): Promise<ReleaseRequest> {
 	const { options, repository } = context
 	options.signal?.throwIfAborted()
-	const excludeDirectories = onlyRepositoryFiles
-		? repository.packages.map((item) => item.directory)
-		: []
+	const excludeDirectories = await excludedPackages(context, pkg, release.ref, onlyRepositoryFiles)
 	const evidence = await collectEvidence(
 		repository,
 		pkg,
@@ -63,9 +61,37 @@ export async function prepareRelease(
 			from: from ?? release.previousRef,
 			to: release.ref,
 		},
-		scope: pkg.directory === '.' && repository.packages.length > 0 ? 'repository' : 'package',
+		scope:
+			pkg.directory === '.' && repository.packages.length > 0 && options.rootChangelog === 'summary'
+				? 'repository'
+				: 'package',
 		version: release.version,
 	}
+}
+
+/**
+ * Select the package directories a release leaves out: every package when
+ * describing repository files alone, or, when the root is a package itself,
+ * those it does not depend on.
+ */
+async function excludedPackages(
+	context: GenerationContext,
+	pkg: PackageInfo,
+	ref: string,
+	onlyRepositoryFiles: boolean,
+): Promise<string[]> {
+	const { options, repository } = context
+	const directories = repository.packages.map((item) => item.directory)
+	if (onlyRepositoryFiles || directories.length === 0) {
+		return directories
+	}
+
+	if (pkg.directory !== '.' || options.rootChangelog !== 'package') {
+		return []
+	}
+
+	const scope = new Set(await packageScope(repository, pkg, ref))
+	return directories.filter((directory) => !scope.has(directory))
 }
 
 function cacheKey(context: GenerationContext, release: ReleaseRequest): string {

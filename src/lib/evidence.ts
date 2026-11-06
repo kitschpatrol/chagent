@@ -23,11 +23,15 @@ function ignored(file: string, packages: PackageInfo[]): boolean {
 	)
 }
 
-async function scopes(repository: Repository, pkg: PackageInfo, ref: string): Promise<string[]> {
-	if (pkg.directory === '.') {
-		return ['.']
-	}
-
+/**
+ * A package's directory and, transitively, those of the workspace packages it
+ * depends on at a ref.
+ */
+export async function packageScope(
+	repository: Repository,
+	pkg: PackageInfo,
+	ref: string,
+): Promise<string[]> {
 	const directories = new Set([pkg.directory])
 	const visit = async (current: PackageInfo) => {
 		const manifest = await manifestAt(repository.root, current.directory, ref)
@@ -123,7 +127,9 @@ export async function collectEvidence(
 	excludeDirectories: string[] = [],
 ): Promise<Evidence[]> {
 	const { packages, root } = repository
-	const directories = await scopes(repository, pkg, release.ref)
+	// The root directory already contains every package it could depend on.
+	const directories =
+		pkg.directory === '.' ? ['.'] : await packageScope(repository, pkg, release.ref)
 	const paths = [
 		...directories.map((directory) => `:(literal)${directory}`),
 		...excludeDirectories.map((directory) => `:(exclude,literal)${directory}`),

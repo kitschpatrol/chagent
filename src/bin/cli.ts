@@ -17,7 +17,7 @@ import { assertAmendable } from '../lib/amend'
 import { defaultModels, defaults, maxTimeoutMinutes } from '../lib/defaults'
 import { createProgressLine } from '../lib/progress'
 import { assertReviewTerminal } from '../lib/review'
-import { agentNames, efforts } from '../lib/types'
+import { agentNames, efforts, rootChangelogs } from '../lib/types'
 
 /**
  * Route library output: a timer on a terminal, plain lines otherwise or when
@@ -157,6 +157,13 @@ try {
 						description: 'Amend a verified unpublished release commit and matching local tags',
 						type: 'boolean',
 					})
+					.option('root-changelog', {
+						choices: rootChangelogs,
+						defaultDescription: defaults.rootChangelog,
+						description:
+							'Monorepo root changelog: a summary of package releases, the root package alone, or none',
+						type: 'string',
+					})
 					.option('github', {
 						defaultDescription: String(defaults.github),
 						description: 'Enrich Git evidence using gh when available; disable with --no-github',
@@ -220,6 +227,7 @@ try {
 							reporter.report(message)
 						},
 						rebuild: args.rebuild,
+						rootChangelog: args.rootChangelog,
 						signal: controller.signal,
 						timeout: args.timeout,
 					}),

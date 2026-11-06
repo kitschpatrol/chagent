@@ -132,24 +132,25 @@ Usage:
 chagent
 ```
 
-| Option                  | Description                                                           | Type                                          | Default                                       |
-| ----------------------- | --------------------------------------------------------------------- | --------------------------------------------- | --------------------------------------------- |
-| `--cwd`                 | Repository directory                                                  | `string`                                      | current directory                             |
-| `--agent`               | Installed agent CLI                                                   | `"codex"` `"claude"`                          | `codex`                                       |
-| `--model`               | Agent model                                                           | `string`                                      | gpt-6.1-sol (Codex); claude-opus-5-5 (Claude) |
-| `--effort`              | Reasoning effort                                                      | `"low"` `"medium"` `"high"` `"xhigh"` `"max"` | `xhigh`                                       |
-| `--interactive`<br>`-i` | Review a diff and optionally edit before writing                      | `boolean`                                     | `false`                                       |
-| `--editor`              | Editor command for interactive review; configure GUI editors to wait  | `string`                                      | git var GIT_EDITOR                            |
-| `--dry-run`             | Print a diff without applying changes                                 | `boolean`                                     | `false`                                       |
-| `--rebuild`             | Reconstruct all history, replacing existing release text              | `boolean`                                     | `false`                                       |
-| `--amend`               | Amend a verified unpublished release commit and matching local tags   | `boolean`                                     | `false`                                       |
-| `--github`              | Enrich Git evidence using gh when available; disable with --no-github | `boolean`                                     | `true`                                        |
-| `--cache`               | Cache drafts and incremental state; disable with --no-cache           | `boolean`                                     | `true`                                        |
-| `--config`              | Configuration file path                                               | `string`                                      | auto-detected from repository root            |
-| `--timeout`             | Agent timeout in minutes                                              | `number`                                      | `20`                                          |
-| `--verbose`             | Log commands, cache decisions, and session details to stderr          | `boolean`                                     | `false`                                       |
-| `--help`<br>`-h`        | Show help                                                             | `boolean`                                     |                                               |
-| `--version`<br>`-v`     | Show version number                                                   | `boolean`                                     |                                               |
+| Option                  | Description                                                                             | Type                                          | Default                                       |
+| ----------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------- | --------------------------------------------- |
+| `--cwd`                 | Repository directory                                                                    | `string`                                      | current directory                             |
+| `--agent`               | Installed agent CLI                                                                     | `"codex"` `"claude"`                          | `codex`                                       |
+| `--model`               | Agent model                                                                             | `string`                                      | gpt-6.1-sol (Codex); claude-opus-5-5 (Claude) |
+| `--effort`              | Reasoning effort                                                                        | `"low"` `"medium"` `"high"` `"xhigh"` `"max"` | `xhigh`                                       |
+| `--interactive`<br>`-i` | Review a diff and optionally edit before writing                                        | `boolean`                                     | `false`                                       |
+| `--editor`              | Editor command for interactive review; configure GUI editors to wait                    | `string`                                      | git var GIT_EDITOR                            |
+| `--dry-run`             | Print a diff without applying changes                                                   | `boolean`                                     | `false`                                       |
+| `--rebuild`             | Reconstruct all history, replacing existing release text                                | `boolean`                                     | `false`                                       |
+| `--amend`               | Amend a verified unpublished release commit and matching local tags                     | `boolean`                                     | `false`                                       |
+| `--root-changelog`      | Monorepo root changelog: a summary of package releases, the root package alone, or none | `"summary"` `"package"` `"none"`              | `summary`                                     |
+| `--github`              | Enrich Git evidence using gh when available; disable with --no-github                   | `boolean`                                     | `true`                                        |
+| `--cache`               | Cache drafts and incremental state; disable with --no-cache                             | `boolean`                                     | `true`                                        |
+| `--config`              | Configuration file path                                                                 | `string`                                      | auto-detected from repository root            |
+| `--timeout`             | Agent timeout in minutes                                                                | `number`                                      | `20`                                          |
+| `--verbose`             | Log commands, cache decisions, and session details to stderr                            | `boolean`                                     | `false`                                       |
+| `--help`<br>`-h`        | Show help                                                                               | `boolean`                                     |                                               |
+| `--version`<br>`-v`     | Show version number                                                                     | `boolean`                                     |                                               |
 
 <!-- /cli-help -->
 
@@ -246,6 +247,8 @@ For an existing post-bump workflow, `chagent --amend` explicitly amends an unpub
 
 Workspace declarations in `pnpm-workspace.yaml` or `package.json` determine the packages to process. Each current workspace package gets its own changelog. The root contains repository highlights and links to package releases.
 
+Use the `rootChangelog` option or `--root-changelog` flag to choose what the root changelog records. The default, `summary`, works as described above. `package` treats the root as a package of its own, for repositories whose main package lives at the root: its changelog describes the root's files and the workspace packages it depends on in full detail, without changes from other packages or links to their releases. `none` writes only the package changelogs. After changing the mode of an existing root changelog, run with `--rebuild` to reconstruct its history in the new form.
+
 For other monorepo layouts, configure `packages` directory globs. These directories do not need npm manifests; their Git tags identify releases, using the directory basename as the package name.
 
 Shared-version repositories use repository versions at the root. Independently versioned repositories use package-qualified headings such as `@example/package@1.2.0`. Repository infrastructure changes appear in the root's `Unreleased` section. Explicit workspace dependencies contribute relevant source context to dependent packages. Dependency and tooling maintenance belongs under `Maintenance`. `build`, `coverage`, and `dist` directories at the top of a package count as generated output and are excluded, so a package named `packages/build` is still treated as source.
@@ -266,6 +269,7 @@ export default defineConfig({
   github: true,
   maxInputChars: 80_000,
   model: 'gpt-6.1-sol',
+  rootChangelog: 'summary',
   timeout: 20,
 })
 ```

@@ -638,6 +638,89 @@ describe('generation and writing', () => {
 		expect(repeated.files).toEqual([])
 	})
 
+	it('describes a root package without changes from packages it does not depend on', async () => {
+		const root = await createRepository({
+			'package.json': JSON.stringify({
+				dependencies: { '@example/core': 'workspace:*' },
+				name: 'example',
+				version: '1.0.0',
+			}),
+			'packages/core/index.js': 'export const core = 1\n',
+			'packages/core/package.json': '{"name":"@example/core","version":"0.1.0"}',
+			'packages/plugin/index.js': 'export const plugin = 1\n',
+			'packages/plugin/package.json': '{"name":"@example/plugin","version":"0.1.0"}',
+			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+		})
+		await git(root, ['tag', 'v1.0.0'])
+		await git(root, ['tag', '@example/core@0.1.0'])
+		await git(root, ['tag', '@example/plugin@0.1.0'])
+		await writeFiles(root, { 'packages/plugin/index.js': 'export const plugin = 2\n' })
+		await commit(root, 'Improve the plugin.')
+		await writeFiles(root, { 'packages/core/index.js': 'export const core = 2\n' })
+		await commit(root, 'Improve the core.')
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await commit(root, 'Change the answer.')
+		const agent = fixtureAgent()
+		const options = { agent, cwd: root, github: false, rootChangelog: 'package' } as const
+		const plan = await generateChangelog(options)
+		const requests = agent.generate.mock.calls.flatMap(([request]) => request.releases)
+		const unreleased = requests.find((release) => release.id === '.@Unreleased')!
+		expect(unreleased.scope).toBe('package')
+		expect(unreleased.repository.excludeDirectories).toEqual(['packages/plugin'])
+		const messages = unreleased.evidence.map((item) => item.text).join('\n')
+		expect(messages).toContain('Change the answer.')
+		expect(messages).toContain('Improve the core.')
+		expect(messages).not.toContain('Improve the plugin.')
+		expect(requests.every((release) => release.scope === 'package')).toBe(true)
+		const rootFile = plan.files.find((file) => file.path === path.join(root, 'changelog.md'))!
+		expect(parseChangelog(rootFile.after).sections.map((section) => section.version)).toEqual([
+			'Unreleased',
+			'1.0.0',
+		])
+		expect(rootFile.after).not.toContain('@example/plugin')
+		expect(plan.files.map((file) => path.relative(root, file.path)).toSorted()).toEqual([
+			'changelog.md',
+			'packages/core/changelog.md',
+			'packages/plugin/changelog.md',
+		])
+		await writeChangelog(plan)
+		const repeated = await generateChangelog(options)
+		expect(repeated.files).toEqual([])
+	})
+
+	it('leaves out the root changelog when it is set to none', async () => {
+		const root = await createRepository({
+			'packages/a/index.js': 'export const a = 1\n',
+			'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',
+			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+		})
+		await git(root, ['tag', 'v1.0.0'])
+		const agent = fixtureAgent()
+		const plan = await generateChangelog({
+			agent,
+			cwd: root,
+			github: false,
+			rootChangelog: 'none',
+		})
+		expect(plan.files.map((file) => path.relative(root, file.path))).toEqual([
+			'packages/a/changelog.md',
+		])
+		expect(
+			agent.generate.mock.calls.flatMap(([request]) =>
+				request.releases.map((release) => release.packageName),
+			),
+		).toEqual(['@example/a'])
+	})
+
+	it('refuses to leave out the root changelog without workspace packages', async () => {
+		const root = await createRepository()
+		const agent = fixtureAgent()
+		await expect(
+			generateChangelog({ agent, cwd: root, github: false, rootChangelog: 'none' }),
+		).rejects.toThrow('no workspace packages')
+		expect(agent.generate).not.toHaveBeenCalled()
+	})
+
 	it('applies a release context from a package directory to that package only', async () => {
 		const root = await createRepository({
 			'packages/a/index.js': 'export const a = 1\n',

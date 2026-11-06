@@ -2,7 +2,7 @@ import { cosmiconfig } from 'cosmiconfig'
 import { z } from 'zod'
 import { defaults, maxTimeoutMinutes } from './defaults'
 import { log } from './log'
-import { agentNames, efforts } from './types'
+import { agentNames, efforts, rootChangelogs } from './types'
 
 const configSchema = z.strictObject({
 	agent: z.enum(agentNames).optional(),
@@ -15,6 +15,11 @@ const configSchema = z.strictObject({
 	model: z.string().min(1).optional(),
 	/** Workspace directory globs, overriding manifest workspace discovery. */
 	packages: z.array(z.string()).optional(),
+	/**
+	 * What a monorepo's root changelog records: a summary of package releases,
+	 * the root package's own changes, or nothing.
+	 */
+	rootChangelog: z.enum(rootChangelogs).optional(),
 	/** Templates containing {version} and optionally {name}. */
 	tagPatterns: z.array(z.string().includes('{version}')).optional(),
 	/** Minutes each agent session may run. */
@@ -28,6 +33,7 @@ const resolvedConfigSchema = configSchema
 		effort: true,
 		github: true,
 		maxInputChars: true,
+		rootChangelog: true,
 		timeout: true,
 	})
 	.transform(({ timeout, ...config }) => ({ ...config, timeoutMs: timeout * 60_000 }))

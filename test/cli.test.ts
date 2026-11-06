@@ -255,6 +255,7 @@ describe('cli', () => {
 		const unknown = await run('--unknown-option')
 		const timeout = await run('--timeout', '-1')
 		const overflow = await run('--timeout', '40000')
+		const rootChangelog = await run('--root-changelog', 'everything')
 		expect(unknown.code).toBe(1)
 		expect(unknown.stderr).toContain('Options:')
 		expect(unknown.stderr).toContain('Unknown arguments: unknown-option')
@@ -262,6 +263,17 @@ describe('cli', () => {
 		expect(timeout.stderr).toContain('positive number')
 		expect(overflow.code).toBe(1)
 		expect(overflow.stderr).toContain('up to 35791')
+		expect(rootChangelog.code).toBe(1)
+		expect(rootChangelog.stderr).toContain('Invalid values')
+	})
+
+	it('passes --root-changelog to generation', async () => {
+		const root = await createRepository()
+		await installCliFixtures(root)
+		const { code, stderr } = await run('--cwd', root, '--no-github', '--root-changelog', 'none')
+		expect(code).toBe(1)
+		expect(stderr).toContain('no workspace packages')
+		await expect(readFile(path.join(root, '.git', 'calls.jsonl'))).rejects.toThrow()
 	})
 
 	it.each([

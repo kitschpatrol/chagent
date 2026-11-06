@@ -2,6 +2,7 @@ import { realpath } from 'node:fs/promises'
 import path from 'node:path'
 import semver from 'semver'
 import type { GenerationContext as Context } from './jobs'
+import type { PackagePlan } from './package-plan'
 import type { ChangelogPlan, GenerateOptions } from './types'
 import { engines } from '../../package.json' with { type: 'json' }
 import { createAgent } from './agents'
@@ -49,6 +50,12 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 	log.debug(
 		`Repository ${root} at ${repository.head}: ${repository.tags.length} reachable tags, ${repository.packages.length} workspace packages.`,
 	)
+	if (config.rootChangelog === 'none' && repository.packages.length === 0) {
+		throw new Error(
+			'The root changelog is set to "none", but this repository has no workspace packages, so there is no changelog to generate. Choose another root changelog mode or configure packages.',
+		)
+	}
+
 	const agent = typeof selected === 'object' ? selected : createAgent(config.agent)
 	const plan: ChangelogPlan = {
 		checkpoints: [],
@@ -79,15 +86,10 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 		plan,
 		repository,
 	}
-	if (repository.packages.length === 0) {
-		const prepared = await preparePackage(context, repository.rootPackage)
-		const results = await generateReleases(
-			context,
-			prepared.work.map((item) => item.request),
-		)
-		plan.releases.push(...renderPackage(context, prepared, results))
-	} else {
+	if (repository.packages.length > 0 && config.rootChangelog === 'summary') {
 		await generateWorkspace(context)
+	} else {
+		await generatePackages(context)
 	}
 
 	if (rebuild) {
@@ -95,6 +97,27 @@ export async function generateChangelog(options: GenerateOptions = {}): Promise<
 	}
 
 	return plan
+}
+
+/** Generate each changelog on its own, with no root summary. */
+async function generatePackages(context: Context): Promise<void> {
+	const { options, plan, repository } = context
+	const packages =
+		options.rootChangelog === 'none'
+			? repository.packages
+			: [repository.rootPackage, ...repository.packages]
+	const prepared: PackagePlan[] = []
+	for (const pkg of packages) {
+		prepared.push(await preparePackage(context, pkg))
+	}
+
+	const results = await generateReleases(
+		context,
+		prepared.flatMap((item) => item.work.map((work) => work.request)),
+	)
+	for (const item of prepared) {
+		plan.releases.push(...renderPackage(context, item, results))
+	}
 }
 
 /** A rebuild that finds nothing to record must not erase an existing changelog. */

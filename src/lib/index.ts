@@ -21,6 +21,7 @@ export type {
 	ReleaseContext,
 	ReleaseRequest,
 	ReleaseSummary,
+	RootChangelog,
 	RunSettings,
 } from './types'
 export { writeChangelog } from './write'

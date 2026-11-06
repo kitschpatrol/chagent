@@ -4,6 +4,7 @@ export const defaults = {
 	effort: 'xhigh',
 	github: true,
 	maxInputChars: 80_000,
+	rootChangelog: 'summary',
 	timeout: 20,
 } as const
 
