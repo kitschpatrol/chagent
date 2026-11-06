@@ -1,7 +1,7 @@
 import { readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import type { AgentAdapter, Category, GenerationRequest } from '../src/lib/types'
+import type { AgentAdapter, Category, ChangelogPlan, GenerationRequest } from '../src/lib/types'
 import { writeCache } from '../src/lib/cache'
 import { changelogHeader, parseChangelog } from '../src/lib/changelog'
 import { assertSupportedNode, generateChangelog } from '../src/lib/generate'
@@ -15,6 +15,13 @@ const ISO_DATE = /\d{4}-\d{2}-\d{2}/gv
 /** Read a section's body without the dates of today's fixture commits. */
 function undated(body = ''): string {
 	return body.trim().replaceAll(ISO_DATE, 'DATE')
+}
+
+/** The changelogs a plan edits, relative to the root with forward slashes. */
+function changelogPaths(plan: ChangelogPlan, root: string): string[] {
+	return plan.files
+		.map((file) => path.relative(root, file.path).split(path.sep).join('/'))
+		.toSorted()
 }
 
 function fixtureAgent(category: Category = 'Changed'): AgentAdapter & {
@@ -1032,7 +1039,7 @@ describe('generation and writing', () => {
 			'1.0.0',
 		])
 		expect(rootFile.after).not.toContain('@example/plugin')
-		expect(plan.files.map((file) => path.relative(root, file.path)).toSorted()).toEqual([
+		expect(changelogPaths(plan, root)).toEqual([
 			'changelog.md',
 			'packages/core/changelog.md',
 			'packages/plugin/changelog.md',
@@ -1056,9 +1063,7 @@ describe('generation and writing', () => {
 			github: false,
 			rootChangelog: 'none',
 		})
-		expect(plan.files.map((file) => path.relative(root, file.path))).toEqual([
-			'packages/a/changelog.md',
-		])
+		expect(changelogPaths(plan, root)).toEqual(['packages/a/changelog.md'])
 		expect(
 			agent.generate.mock.calls.flatMap(([request]) =>
 				request.releases.map((release) => release.packageName),
@@ -1129,10 +1134,7 @@ describe('generation and writing', () => {
 			expect(evidence('.@Unreleased')).toContain('Change the answer.')
 			expect(evidence('.@Unreleased')).not.toContain('Improve the internal package.')
 			expect(requests.some((release) => release.packageName === '@example/internal')).toBe(false)
-			expect(plan.files.map((file) => path.relative(root, file.path)).toSorted()).toEqual([
-				'changelog.md',
-				'packages/a/changelog.md',
-			])
+			expect(changelogPaths(plan, root)).toEqual(['changelog.md', 'packages/a/changelog.md'])
 			expect(
 				plan.files.find((file) => file.path === path.join(root, 'changelog.md'))?.after,
 			).not.toContain('@example/internal')
