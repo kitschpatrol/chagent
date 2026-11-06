@@ -1,8 +1,8 @@
 import path from 'node:path'
+import type { PackageLink, SectionEntry } from './changelog'
 import type { GenerationContext as Context } from './jobs'
 import type { PackagePlan } from './package-plan'
 import type {
-	Category,
 	Change,
 	ChangelogPlan,
 	Release,
@@ -12,11 +12,12 @@ import type {
 } from './types'
 import {
 	findChangelog,
-	LINE_BOUNDARY,
 	noNotableChanges,
+	packageLinksDiffer,
 	parseChangelog,
 	styleReference,
 	updateMarkdown,
+	withoutPackageLinks,
 } from './changelog'
 import { generateReleases, prepareRelease } from './jobs'
 import {
@@ -30,135 +31,93 @@ import {
 } from './package-plan'
 import { git } from './process'
 import { describedPackages, resolveReleases } from './repository'
-import { categories } from './types'
 
+/** A root changelog with a section for each package release. */
 type IndependentPlan = {
 	content?: string
+	draft?: string
 	file: Awaited<ReturnType<typeof findChangelog>>
-	release: Release
-	request: ReleaseRequest
+	/** Summaries of the package releases the root does not record yet. */
+	releases: ReleaseRequest[]
+	/** Changes to repository files outside every package. */
+	unreleased: { release: Release; request: ReleaseRequest }
 }
 
-function packageLink(repository: Repository, summary: ReleaseSummary): string {
+/** Link to a package's release section, when its changelog has one. */
+function packageLink(repository: Repository, summary: ReleaseSummary): PackageLink[] {
+	if (summary.anchor === undefined) {
+		return []
+	}
+
 	const relative = path.relative(repository.root, summary.changelogPath).split(path.sep).join('/')
-	const anchor =
-		summary.anchor ??
-		(summary.version === 'Unreleased'
-			? 'unreleased'
-			: `${summary.version.replaceAll('.', '')}${summary.date === undefined ? '' : '---' + summary.date}`)
-	return repository.github === undefined
-		? `${relative}#${anchor}`
-		: `https://github.com/${repository.github}/blob/HEAD/${relative}#${anchor}`
+	const target = `${relative}#${summary.anchor}`
+	return [
+		{
+			label: `${summary.packageName} ${summary.version}`,
+			url:
+				repository.github === undefined
+					? target
+					: `https://github.com/${repository.github}/blob/HEAD/${target}`,
+		},
+	]
 }
 
-function aggregateChanges(repository: Repository, summaries: ReleaseSummary[]): Change[] {
-	const changes: Change[] = []
-	for (const summary of summaries) {
-		if (summary.version === 'Unreleased' && summary.changes.length === 0) {
-			continue
-		}
-
-		const link = `[${summary.packageName} ${summary.version}](${packageLink(repository, summary)})`
-		const highlights = summary.changes.slice(0, 3)
-		if (highlights.length === 0) {
-			changes.push({
-				breaking: false,
-				category: 'Maintenance',
-				description: `${link}: See the package changelog.`,
-				sources: [],
-			})
-		} else {
-			for (const change of highlights) {
-				changes.push({ ...change, description: `${link}: ${change.description}` })
-			}
-		}
-	}
-
-	return changes
-}
-
-function promotePackageDraft(
-	content: string | undefined,
-	summary: ReleaseSummary,
-	repository: Repository,
-): { changes: Change[]; content: string | undefined } {
-	const changes: Change[] = []
-	const draft = parseChangelog(content ?? '').sections.find(
-		(section) => section.version === 'Unreleased',
-	)
-	if (content === undefined || draft === undefined) {
-		return { changes, content }
-	}
-
-	const source = `[${summary.packageName} Unreleased](`
-	const target = `[${summary.packageName} ${summary.version}](${packageLink(repository, summary)})`
-	const remaining: string[] = []
-	let category: Category = 'Changed'
-	for (const line of draft.body.split(LINE_BOUNDARY)) {
-		category = categories.find((item) => line.trimEnd() === `### ${item}`) ?? category
-		const breaking = line.startsWith('- **Breaking:** ')
-		const prefix = breaking ? '- **Breaking:** ' : '- '
-		const end = line.indexOf(')', prefix.length + source.length)
-		if (end === -1 || !line.startsWith(prefix + source)) {
-			remaining.push(line)
-			continue
-		}
-
-		changes.push({
-			breaking,
-			category,
-			description: target + line.slice(end + 1).trimEnd(),
-			sources: [],
-		})
-	}
-
-	if (changes.length === 0) {
-		return { changes, content }
-	}
-
-	const meaningful = remaining.some(
-		(line) => line.trim() !== '' && categories.every((item) => line.trimEnd() !== `### ${item}`),
-	)
-	const replacement = meaningful ? draft.heading + remaining.join('') : ''
-	return {
-		changes,
-		content: content.slice(0, draft.start) + replacement + content.slice(draft.end),
-	}
+/** Name the root's summary of a package release. */
+function summaryId(summary: ReleaseSummary): string {
+	return `.@${summary.packageName}@${summary.version}`
 }
 
 async function prepareIndependent(
 	context: Context,
-	summaries: ReleaseSummary[],
+	packages: PackagePlan[],
 ): Promise<IndependentPlan> {
 	const { repository } = context
 	const file = await findChangelog(repository.root)
 	const content = context.options.rebuild ? undefined : file.content
-	let remaining = content
-	for (const summary of missingPackageSummaries(summaries, content)) {
-		remaining = promotePackageDraft(remaining, summary, repository).content
+	const parsed = parseChangelog(content ?? '')
+	const details = {
+		mode: content === undefined ? 'initialize' : 'update',
+		styleReference: styleReference(parsed),
+	} as const
+	const releases: ReleaseRequest[] = []
+	for (const item of packages) {
+		for (const summary of missingPackageSummaries(item.summaries, content)) {
+			const release = item.releases.find((candidate) => candidate.version === summary.version)!
+			const request = await prepareRelease(context, item.pkg, release, details)
+			// The package's own request, or the agent's research, supplies the commits.
+			releases.push({
+				...request,
+				evidence: request.evidence.filter((evidence) => evidence.kind === 'range'),
+				id: summaryId(summary),
+				scope: 'repository',
+			})
+		}
 	}
 
 	const releaseRefs = new Set(
-		summaries.filter((summary) => summary.version !== 'Unreleased').map((summary) => summary.ref),
+		packages
+			.flatMap((item) => item.summaries)
+			.filter((summary) => summary.version !== 'Unreleased')
+			.map((summary) => summary.ref),
 	)
 	const ancestors = await git(repository.root, ['rev-list', '--topo-order', repository.head])
 	const base = ancestors.split('\n').find((ref) => releaseRefs.has(ref))
 	const release: Release = { previousRef: base, ref: repository.head, version: 'Unreleased' }
-	const draft = parseChangelog(remaining ?? '').sections.find(
-		(section) => section.version === 'Unreleased',
-	)?.body
-	const from = await incrementalBase(context, file.path, remaining, release)
+	const draft = parsed.sections.find((section) => section.version === 'Unreleased')?.body
 	const request = await prepareRelease(context, repository.rootPackage, release, {
-		existingEntries: draft,
-		from,
-		mode: content === undefined ? 'initialize' : 'update',
+		...details,
+		existingEntries: draft === undefined ? undefined : withoutPackageLinks(draft),
+		from: await incrementalBase(context, file.path, content, release),
 		onlyRepositoryFiles: true,
-		styleReference: styleReference(parseChangelog(content ?? '')),
 	})
-	return { content, file, release, request }
+	return { content, draft, file, releases, unreleased: { release, request } }
 }
 
-function aggregateIndependent(
+/**
+ * Write a section for each package release the root does not record yet, and
+ * keep the draft's links to packages with unreleased changes current.
+ */
+function renderIndependent(
 	context: Context,
 	prepared: IndependentPlan,
 	results: Map<string, Change[]>,
@@ -166,33 +125,27 @@ function aggregateIndependent(
 	exception: boolean,
 ): void {
 	const { plan, repository } = context
-	const { file } = prepared
-	let { content } = prepared
-	const entries: Parameters<typeof updateMarkdown>[1] = []
-	for (const summary of missingPackageSummaries(summaries, content)) {
-		const label = `${summary.packageName}@${summary.version}`
-		const promoted = promotePackageDraft(content, summary, repository)
-		content = promoted.content
-		entries.push({
-			changes: [...promoted.changes, ...aggregateChanges(repository, [summary])],
-			release: { date: summary.date, ref: summary.ref, tag: summary.tag, version: label },
-		})
-	}
-
-	const unreleased = aggregateChanges(
-		repository,
-		summaries.filter((summary) => summary.version === 'Unreleased'),
+	const { content, draft, file, unreleased } = prepared
+	const entries: SectionEntry[] = Array.from(
+		missingPackageSummaries(summaries, content),
+		(summary) => ({
+			changes: results.get(summaryId(summary)) ?? [],
+			links: packageLink(repository, summary),
+			release: {
+				date: summary.date,
+				ref: summary.ref,
+				tag: summary.tag,
+				version: `${summary.packageName}@${summary.version}`,
+			},
+		}),
 	)
-	const draft = parseChangelog(content ?? '').sections.find(
-		(section) => section.version === 'Unreleased',
-	)?.body
-	unreleased.push(...(results.get(prepared.request.id) ?? []))
-	if (unreleased.length > 0) {
-		entries.push({
-			changes: unreleased,
-			existingBody: draft,
-			release: { ref: repository.head, version: 'Unreleased' },
-		})
+
+	const changes = results.get(unreleased.request.id) ?? []
+	const links = summaries
+		.filter((summary) => summary.version === 'Unreleased')
+		.flatMap((summary) => packageLink(repository, summary))
+	if (changes.length > 0 || packageLinksDiffer(draft, links)) {
+		entries.push({ changes, existingBody: draft, links, release: unreleased.release })
 	}
 
 	const after = updateMarkdown(content, entries, exception, repository.github)
@@ -200,7 +153,7 @@ function aggregateIndependent(
 		plan.files.push({ after, before: file.content, path: file.path })
 	}
 
-	recordCheckpoint(context, file.path, after, prepared.release)
+	recordCheckpoint(context, file.path, after, unreleased.release)
 }
 
 /**
@@ -221,44 +174,6 @@ function quietReleases(plan: ChangelogPlan, packages: PackagePlan[]): Set<string
 	return quiet
 }
 
-function aggregateShared(
-	context: Context,
-	prepared: PackagePlan,
-	results: Map<string, Change[]>,
-	exception: boolean,
-	quiet: Set<string>,
-): void {
-	const { plan, repository } = context
-	renderPackage(context, prepared, results)
-	const rootEdit = plan.files.find((file) => path.dirname(file.path) === repository.root)
-	if (rootEdit === undefined) {
-		return
-	}
-
-	// A package's release belongs to a root release only when it shares that release's commit.
-	const additions = prepared.summaries.map((summary) => ({
-		changes: aggregateChanges(
-			repository,
-			plan.releases.filter(
-				(item) =>
-					item.version === summary.version &&
-					item.ref === summary.ref &&
-					!quiet.has(`${item.changelogPath}@${item.version}`),
-			),
-		),
-		existingBody: parseChangelog(rootEdit.after).sections.find(
-			(section) => section.version === summary.version,
-		)?.body,
-		release: prepared.releases.find((item) => item.version === summary.version)!,
-	}))
-	rootEdit.after = updateMarkdown(
-		prepared.content,
-		additions,
-		exception || prepared.exception,
-		repository.github,
-	)
-}
-
 /** Generate package changelogs and the root changelog that summarizes them. */
 export async function generateWorkspace(context: Context): Promise<void> {
 	const { options, plan, repository } = context
@@ -271,32 +186,22 @@ export async function generateWorkspace(context: Context): Promise<void> {
 	const shared = rootReleases.some((release) => release.version !== 'Unreleased')
 	const rootFile = await findChangelog(repository.root)
 	const rootContent = options.rebuild ? undefined : rootFile.content
-	const rootMissing = shared ? missingReleases(rootReleases, rootContent) : undefined
-	const needsPackageHistory =
-		rootMissing === undefined || rootMissing.some((release) => release.version !== 'Unreleased')
-	const recordedAtRoot = (summary: ReleaseSummary): boolean =>
-		rootMissing === undefined
-			? rootContent !== undefined && missingPackageSummaries([summary], rootContent).length === 0
-			: rootMissing.every(
-					(release) => release.version !== summary.version || release.ref !== summary.ref,
-				)
+	// A root release that is yet to be recorded can link to package history written earlier.
+	const linksHistory =
+		!shared ||
+		missingReleases(rootReleases, rootContent).some((release) => release.version !== 'Unreleased')
 	const packages: PackagePlan[] = []
 	for (const pkg of describedPackages(repository)) {
-		packages.push(await preparePackage(context, pkg, needsPackageHistory, recordedAtRoot))
+		packages.push(await preparePackage(context, pkg, linksHistory))
 	}
 
 	const root = shared ? await preparePackage(context, repository.rootPackage) : undefined
-	const independent = shared
-		? undefined
-		: await prepareIndependent(
-				context,
-				packages.flatMap((pkg) => pkg.summaries),
-			)
+	const independent = shared ? undefined : await prepareIndependent(context, packages)
 	const requests = [...packages, ...(root === undefined ? [] : [root])].flatMap((pkg) =>
 		pkg.work.map((item) => item.request),
 	)
 	if (independent !== undefined) {
-		requests.push(independent.request)
+		requests.push(...independent.releases, independent.unreleased.request)
 	}
 
 	const results = await generateReleases(context, requests)
@@ -304,8 +209,23 @@ export async function generateWorkspace(context: Context): Promise<void> {
 	plan.releases.push(...summaries)
 	const exception = packages.some((pkg) => pkg.exception)
 	if (root !== undefined) {
-		aggregateShared(context, root, results, exception, quietReleases(plan, packages))
+		const quiet = quietReleases(plan, packages)
+		// A package's release belongs to a root release only when it shares that release's commit.
+		renderPackage(
+			context,
+			{ ...root, exception: exception || root.exception },
+			results,
+			(release) =>
+				summaries
+					.filter(
+						(summary) =>
+							summary.version === release.version &&
+							summary.ref === release.ref &&
+							!quiet.has(`${summary.changelogPath}@${summary.version}`),
+					)
+					.flatMap((summary) => packageLink(repository, summary)),
+		)
 	} else if (independent !== undefined) {
-		aggregateIndependent(context, independent, results, summaries, exception)
+		renderIndependent(context, independent, results, summaries, exception)
 	}
 }

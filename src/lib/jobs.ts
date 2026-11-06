@@ -26,6 +26,15 @@ export type GenerationContext = {
 	repository: Repository
 }
 
+/** Check whether a package's changelog is a monorepo's root summary. */
+export function summarizesPackages(context: GenerationContext, pkg: PackageInfo): boolean {
+	return (
+		pkg.directory === '.' &&
+		context.repository.packages.length > 0 &&
+		context.options.rootChangelog === 'summary'
+	)
+}
+
 /** What a release request carries besides its range. */
 type ReleaseDetails = Pick<ReleaseRequest, 'mode' | 'styleReference'> & {
 	existingEntries?: string
@@ -68,10 +77,7 @@ export async function prepareRelease(
 			from: from ?? release.previousRef,
 			to: release.ref,
 		},
-		scope:
-			pkg.directory === '.' && repository.packages.length > 0 && options.rootChangelog === 'summary'
-				? 'repository'
-				: 'package',
+		scope: summarizesPackages(context, pkg) ? 'repository' : 'package',
 		styleReference,
 		version: release.version,
 	}

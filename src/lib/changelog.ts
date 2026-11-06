@@ -1,11 +1,12 @@
 import { lstat, readdir } from 'node:fs/promises'
 import path from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import semver from 'semver'
 import type { Category, Change, Release } from './types'
 import { parseVersion, readOptional } from './repository'
 import { categories } from './types'
 
-export const LINE_BOUNDARY = /(?<=\n)/v
+const LINE_BOUNDARY = /(?<=\n)/v
 const FENCE = /^\s{0,3}(`{3,}|~{3,})/v
 const RELEASE_HEADING =
 	/^(#{1,3}) (?:\[([^\]]+)\](?:\([^\)]*\))?|(\S+))(?:\s+(?:[\-–—\/].*|\(.*\)))?$/v
@@ -19,6 +20,8 @@ const BULLET = /^\s*[\-*] /v
 const ENTRY = /^\s*[\-*] /mv
 const STYLE_REFERENCE_LENGTH = 2000
 const CATEGORY_HEADING = /^### /mv
+const PACKAGES_HEADING = /^### Packages\s*$/mv
+const LINK_TARGET = /\]\(([^\)]*)\)/gv
 const SEMVER_LINE = /^.*\[Semantic Versioning\].*(?:\r?\n|$)/mv
 const UNRELEASED_REFERENCE = /^\[unreleased\]:[^\r\n]*(?:\r?\n)?/imv
 const V_PREFIX = /^v\d/v
@@ -29,6 +32,18 @@ export const changelogHeader =
 export const noNotableChanges = 'No notable changes.'
 export const nodeExceptionNote =
 	'(Node.js support requirements have sometimes increased in minor or patch releases.)'
+
+/** A link from a root summary to a package release it covers. */
+export type PackageLink = { label: string; url: string }
+
+/** One release section to write, with the draft it grows from. */
+export type SectionEntry = {
+	changes: Change[]
+	existingBody?: string
+	/** Given for a root summary, whose package links are replaced on every write. */
+	links?: PackageLink[]
+	release: Release
+}
 
 type Section = { body: string; end: number; heading: string; start: number; version: string }
 type Changelog = { footer: string; header: string; newline: string; sections: Section[] }
@@ -128,12 +143,15 @@ export function parseChangelog(content: string): Changelog {
  * changelog is written. Long sections are cut at a line boundary.
  */
 export function styleReference({ sections }: Changelog): string | undefined {
-	const section = sections.find(({ body, version }) => version !== 'Unreleased' && ENTRY.test(body))
-	if (section === undefined) {
+	const body = sections
+		.filter(({ version }) => version !== 'Unreleased')
+		.map((section) => withoutPackageLinks(section.body))
+		.find((entries) => ENTRY.test(entries))
+	if (body === undefined) {
 		return undefined
 	}
 
-	const lines = section.body.trim().split(LINE_BOUNDARY)
+	const lines = body.trim().split(LINE_BOUNDARY)
 	let sample = ''
 	for (const line of lines) {
 		if (sample.length + line.length > STYLE_REFERENCE_LENGTH) {
@@ -219,6 +237,62 @@ function laterCategoryIndex(body: string, category: Category): number | undefine
 	return indexes.length === 0 ? undefined : Math.min(...indexes)
 }
 
+/** Locate the package links that end a root summary's section. */
+function packagesBlock(body: string): undefined | { start: number; end: number } {
+	const heading = PACKAGES_HEADING.exec(body)
+	if (heading === null) {
+		return undefined
+	}
+
+	const after = heading.index + heading[0].length
+	const next = CATEGORY_HEADING.exec(body.slice(after))
+	return { start: heading.index, end: next === null ? body.length : after + next.index }
+}
+
+/** Remove the package links from a root summary's section, leaving its entries. */
+export function withoutPackageLinks(body: string): string {
+	const block = packagesBlock(body)
+	return block === undefined ? body : body.slice(0, block.start) + body.slice(block.end)
+}
+
+/**
+ * Check whether a section links to other package releases than it should.
+ * Targets are compared, since a formatter may restyle the list around them.
+ */
+export function packageLinksDiffer(body: string | undefined, links: PackageLink[]): boolean {
+	const block = body === undefined ? undefined : packagesBlock(body)
+	const targets =
+		body === undefined || block === undefined
+			? []
+			: body
+					.slice(block.start, block.end)
+					.matchAll(LINK_TARGET)
+					.map((match) => match[1])
+					.toArray()
+	return !isDeepStrictEqual(
+		targets,
+		links.map(({ url }) => url),
+	)
+}
+
+/** Merge new changes into a section's draft and end it with its package links. */
+function sectionBody(
+	{ changes, existingBody = '', links }: Omit<SectionEntry, 'release'>,
+	newline: string,
+): string {
+	const body = mergeChanges(
+		links === undefined ? existingBody : withoutPackageLinks(existingBody),
+		changes,
+		newline,
+	)
+	if (links === undefined || links.length === 0) {
+		return body
+	}
+
+	const list = links.map(({ label, url }) => `- [${label}](${url})`)
+	return body.trimEnd() + newline + newline + ['### Packages', '', ...list].join(newline)
+}
+
 /** Render a release heading with an optional comparison link. */
 function releaseLink(github: string | undefined, release: Release): string | undefined {
 	if (github === undefined) {
@@ -244,7 +318,7 @@ function releaseLink(github: string | undefined, release: Release): string | und
 /** Insert new sections and update only the draft and its comparison link. */
 export function updateMarkdown(
 	original: string | undefined,
-	entries: Array<{ changes: Change[]; existingBody?: string; release: Release }>,
+	entries: SectionEntry[],
 	nodeException: boolean,
 	github?: string,
 ): string {
@@ -261,13 +335,18 @@ export function updateMarkdown(
 		.filter((section) => section.version !== 'Unreleased')
 		.map((section) => content.slice(section.start, section.end))
 	let draftText = draft === undefined ? '' : content.slice(draft.start, draft.end)
-	for (const { changes, existingBody, release } of entries) {
+	for (const { changes, existingBody, links, release } of entries) {
 		const link = releaseLink(github, release)
 		const title = link === undefined ? release.version : `[${release.version}]`
 		const heading = `## ${title}${release.date === undefined ? '' : ` - ${release.date}`}`
-		let body = mergeChanges(existingBody ?? '', changes, newline)
+		let body = sectionBody({ changes, existingBody, links }, newline)
 		if (body.trim() === '') {
 			if (release.version === 'Unreleased') {
+				// A draft left with nothing to say goes away with its last package link.
+				if (existingBody !== undefined) {
+					draftText = ''
+				}
+
 				continue
 			}
 

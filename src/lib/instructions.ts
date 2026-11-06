@@ -65,9 +65,16 @@ Give distinct changes separate readable bullets;
 do not compress unrelated features or breaking changes into one long entry. Keep
 each entry concise without sacrificing coverage. Consolidate related commits,
 not unrelated changes. There is no three-entry limit for package scope, including
-a single-package repository's root changelog. Only scope=repository denotes a
-short monorepo root summary; prefer three highlights there because package
-changelogs contain the details.
+a single-package repository's root changelog.
+
+Only scope=repository asks for a summary: an entry in a monorepo's root
+changelog, which the caller ends with links to the package changelogs that hold
+the details. Write what a reader of the whole repository most needs to know, in
+at most three entries, rather than repeating package entries one by one. Combine
+related changes across packages and name the packages they affect. When
+repository.directory is a package, summarize that package's release; otherwise
+summarize the repository, including changes outside any package. Do not write
+the links yourself.
 
 Use commit messages and PRs to understand intent, then check the changed files
 and diffs. Inspect public interfaces at both ends of the range before claiming

@@ -1,6 +1,7 @@
 import path from 'node:path'
 import semver from 'semver'
 import { z } from 'zod'
+import type { PackageLink, SectionEntry } from './changelog'
 import type { GenerationContext as Context } from './jobs'
 import type {
 	Change,
@@ -12,9 +13,16 @@ import type {
 	ResolvedOptions,
 } from './types'
 import { changelogHash, readCache } from './cache'
-import { findChangelog, parseChangelog, styleReference, updateMarkdown } from './changelog'
+import {
+	findChangelog,
+	packageLinksDiffer,
+	parseChangelog,
+	styleReference,
+	updateMarkdown,
+	withoutPackageLinks,
+} from './changelog'
 import { instructionVersion } from './instructions'
-import { prepareRelease } from './jobs'
+import { prepareRelease, summarizesPackages } from './jobs'
 import { log } from './log'
 import { isAncestor } from './process'
 import { hasNodeException, resolveReleases } from './repository'
@@ -36,13 +44,14 @@ export type PackagePlan = {
 	content?: string
 	exception: boolean
 	file: Awaited<ReturnType<typeof findChangelog>>
+	pkg: PackageInfo
 	releases: Release[]
 	summaries: ReleaseSummary[]
+	/** The releases the changelog still needs, each with a request to describe it. */
 	work: Array<{
 		existingBody?: string
 		release: Release
 		request: ReleaseRequest
-		shouldWrite: boolean
 	}>
 }
 
@@ -135,12 +144,15 @@ export function releaseContext(
 	return pkg.directory === options.releaseDirectory ? options.release : undefined
 }
 
-/** Resolve a package's releases and prepare requests for those it still needs. */
+/**
+ * Resolve a package's releases and prepare requests for those its changelog
+ * still needs. Summaries cover those releases alone, or with `allSummaries`,
+ * every release, so that a root changelog can link to any of them.
+ */
 export async function preparePackage(
 	context: Context,
 	pkg: PackageInfo,
-	aggregateHistory = false,
-	recordedAtRoot?: (summary: ReleaseSummary) => boolean,
+	allSummaries = false,
 ): Promise<PackagePlan> {
 	const { repository } = context
 	const file = await findChangelog(path.join(repository.root, pkg.directory))
@@ -164,11 +176,11 @@ export async function preparePackage(
 	const summaries: ReleaseSummary[] = []
 	for (const release of releases) {
 		const shouldWrite = missing.includes(release)
-		if (!shouldWrite && !aggregateHistory) {
+		if (!shouldWrite && !allSummaries) {
 			continue
 		}
 
-		const summary: ReleaseSummary = {
+		summaries.push({
 			changelogPath: file.path,
 			changes: [],
 			date: release.date,
@@ -177,10 +189,8 @@ export async function preparePackage(
 			ref: release.ref,
 			tag: release.tag,
 			version: release.version,
-		}
-		summaries.push(summary)
-		// Retain release boundaries without regenerating summaries already present at the root.
-		if (!shouldWrite && recordedAtRoot?.(summary) === true) {
+		})
+		if (!shouldWrite) {
 			continue
 		}
 
@@ -191,33 +201,48 @@ export async function preparePackage(
 				? undefined
 				: await incrementalBase(context, file.path, content, release)
 		const request = await prepareRelease(context, pkg, release, {
-			existingEntries: existingBody,
+			// A root summary's package links are maintained here, not by the agent.
+			existingEntries:
+				existingBody !== undefined && summarizesPackages(context, pkg)
+					? withoutPackageLinks(existingBody)
+					: existingBody,
 			from,
 			mode,
 			styleReference: styleReference(parsed),
 		})
-		work.push({ existingBody, release, request, shouldWrite })
+		work.push({ existingBody, release, request })
 	}
 
 	const exception = await hasNodeException(repository, pkg, releases)
-	return { content, exception, file, releases, summaries, work }
+	return { content, exception, file, pkg, releases, summaries, work }
 }
 
-/** Write a package's edit into the plan and complete its summaries. */
+/**
+ * Write a package's edit into the plan and complete its summaries. A root
+ * summary passes `linksFor` to end each section it writes with links to the
+ * package releases that section covers.
+ */
 export function renderPackage(
 	context: Context,
 	prepared: PackagePlan,
 	results: Map<string, Change[]>,
+	linksFor?: (release: Release) => PackageLink[],
 ): ReleaseSummary[] {
 	const { plan, repository } = context
 	const { content, exception, file, releases, summaries, work } = prepared
-	const entries: Parameters<typeof updateMarkdown>[1] = []
+	const entries: SectionEntry[] = []
 	const changesByVersion = new Map<string, Change[]>()
-	for (const { existingBody, release, request, shouldWrite } of work) {
+	for (const { existingBody, release, request } of work) {
 		const changes = results.get(request.id) ?? []
+		const links = linksFor?.(release)
 		changesByVersion.set(release.version, changes)
-		if (shouldWrite && (release.version !== 'Unreleased' || changes.length > 0)) {
-			entries.push({ changes, existingBody, release })
+		// A draft is rewritten only for something new, so a formatted one stays as it is.
+		if (
+			release.version !== 'Unreleased' ||
+			changes.length > 0 ||
+			(links !== undefined && packageLinksDiffer(existingBody, links))
+		) {
+			entries.push({ changes, existingBody, links, release })
 		}
 	}
 

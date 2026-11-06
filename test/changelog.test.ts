@@ -4,9 +4,11 @@ import {
 	changelogHeader,
 	mergeChanges,
 	nodeExceptionNote,
+	packageLinksDiffer,
 	parseChangelog,
 	styleReference,
 	updateMarkdown,
+	withoutPackageLinks,
 } from '../src/lib/changelog'
 
 const THEME_DESCRIPTION = /Support custom themes/gv
@@ -101,6 +103,12 @@ describe('style reference', () => {
 		expect(styleReference(parseChangelog(content))).toBe('### Added\n\n* added themes (#1)')
 	})
 
+	it('leaves package links out of the sample and skips sections that have nothing else', () => {
+		const content =
+			'## 1.1.0\n\n### Packages\n\n- [a 1.1.0](a.md#110)\n\n## 1.0.0\n\n### Fixed\n\n- Fix it.\n\n### Packages\n\n- [a 1.0.0](a.md#100)\n'
+		expect(styleReference(parseChangelog(content))).toBe('### Fixed\n\n- Fix it.')
+	})
+
 	it('cuts a long section at a line boundary', () => {
 		const entries = Array.from({ length: 200 }, (_, index) => `- Entry number ${index}.\n`)
 		const sample = styleReference(parseChangelog(`## 1.0.0\n\n${entries.join('')}`))!
@@ -115,6 +123,78 @@ describe('style reference', () => {
 		'## 1.0.0\n\nNo notable changes.\n',
 	])('offers nothing for %j', (content) => {
 		expect(styleReference(parseChangelog(content))).toBeUndefined()
+	})
+})
+
+describe('package links', () => {
+	const links = '### Packages\n\n- [a 1.0.0](packages/a/changelog.md#100)\n'
+	const link = { label: 'b Unreleased', url: 'packages/b/changelog.md#unreleased' }
+
+	it('removes only the package links from a section', () => {
+		const entries = '\nA note.\n\n### Added\n\n- An entry.\n\n'
+		expect(withoutPackageLinks(entries + links)).toBe(entries)
+		expect(withoutPackageLinks(entries + links + '\n### Fixed\n\n- A fix.\n')).toBe(
+			entries + '### Fixed\n\n- A fix.\n',
+		)
+		expect(withoutPackageLinks(entries)).toBe(entries)
+	})
+
+	it('compares link targets, however a formatter restyles the list', () => {
+		const current = [{ label: 'a 1.0.0', url: 'packages/a/changelog.md#100' }]
+		const restyled = '### Packages\r\n\r\n* [a  1.0.0](packages/a/changelog.md#100)\r\n'
+		expect(packageLinksDiffer(restyled, current)).toBe(false)
+		expect(packageLinksDiffer(restyled, [...current, link])).toBe(true)
+		expect(packageLinksDiffer(restyled, [])).toBe(true)
+		expect(packageLinksDiffer(undefined, [])).toBe(false)
+		expect(packageLinksDiffer('### Added\n\n- [A link](https://example.com).\n', [])).toBe(false)
+	})
+
+	it('replaces the links of a draft and keeps its entries', () => {
+		const draft = `\n### Added\n\n- A handwritten note.\n\n${links}\n`
+		const result = updateMarkdown(
+			`${changelogHeader}\n## Unreleased\n${draft}## 1.0.0\n\n- First.\n`,
+			[
+				{
+					changes: [change],
+					existingBody: draft,
+					links: [link],
+					release: { ref: 'abc', version: 'Unreleased' },
+				},
+			],
+			false,
+		)
+		expect(result).toBe(
+			`${changelogHeader}\n## Unreleased\n\n### Added\n\n- A handwritten note.\n- Support custom themes.\n\n### Packages\n\n- [b Unreleased](packages/b/changelog.md#unreleased)\n\n## 1.0.0\n\n- First.\n`,
+		)
+	})
+
+	it('removes a draft left with nothing but outdated links', () => {
+		const original = `${changelogHeader}\n## Unreleased\n\n${links}\n## 1.0.0\n\n- First.\n`
+		const draft = parseChangelog(original).sections[0]!.body
+		const result = updateMarkdown(
+			original,
+			[
+				{
+					changes: [],
+					existingBody: draft,
+					links: [],
+					release: { ref: 'abc', version: 'Unreleased' },
+				},
+			],
+			false,
+		)
+		expect(result).toBe(`${changelogHeader}\n## 1.0.0\n\n- First.\n`)
+	})
+
+	it('records a release that has only package links to show', () => {
+		const result = updateMarkdown(
+			undefined,
+			[{ changes: [], links: [link], release: { ref: 'abc', version: '1.0.0' } }],
+			false,
+		)
+		expect(result).toBe(
+			`${changelogHeader}\n## 1.0.0\n\n### Packages\n\n- [b Unreleased](packages/b/changelog.md#unreleased)\n`,
+		)
 	})
 })
 

@@ -246,7 +246,7 @@ For an existing post-bump workflow such as `npm version`, `chagent --amend` expl
 
 ### Monorepos
 
-Workspace declarations in `pnpm-workspace.yaml` or `package.json` determine the packages to process. Each current workspace package gets its own changelog. The root contains repository highlights and links to package releases.
+Workspace declarations in `pnpm-workspace.yaml` or `package.json` determine the packages to process. Each current workspace package gets its own changelog. The root changelog summarizes the repository: each of its sections holds a few highlights written by the agent, followed by a `Packages` list linking to the package release sections it covers. Chagent maintains that list, so a draft's links to unreleased package changes are replaced by links to the releases once they exist. Package entries are not copied into the root.
 
 Use the `rootChangelog` option or `--root-changelog` flag to choose what the root changelog records. The default, `summary`, works as described above. `package` treats the root as a package of its own, for repositories whose main package lives at the root: its changelog describes the root's files and the workspace packages it depends on in full detail, without changes from other packages or links to their releases. `none` writes only the package changelogs. After changing the mode of an existing root changelog, run with `--rebuild` to reconstruct its history in the new form.
 
@@ -254,7 +254,7 @@ Use `skipPackage` directory globs, or repeat `--skip-package`, to leave workspac
 
 For other monorepo layouts, configure `packages` directory globs. These directories do not need npm manifests; their Git tags identify releases, using the directory basename as the package name.
 
-Shared-version repositories use repository versions at the root. Independently versioned repositories use package-qualified headings such as `@example/package@1.2.0`. Repository infrastructure changes appear in the root's `Unreleased` section. Explicit workspace dependencies contribute relevant source context to dependent packages. Dependency and tooling maintenance belongs under `Maintenance`. `build`, `coverage`, and `dist` directories at the top of a package usually hold generated output, so they are left out of the starting evidence and the agent decides whether their changes belong in the changelog. A package named `packages/build` is still treated as source.
+Shared-version repositories use repository versions at the root, where each release summarizes every package released with it. Independently versioned repositories use package-qualified headings such as `@example/package@1.2.0`, each summarizing one package release. Repository infrastructure changes appear in the root's `Unreleased` section. Explicit workspace dependencies contribute relevant source context to dependent packages. Dependency and tooling maintenance belongs under `Maintenance`. `build`, `coverage`, and `dist` directories at the top of a package usually hold generated output, so they are left out of the starting evidence and the agent decides whether their changes belong in the changelog. A package named `packages/build` is still treated as source.
 
 GitHub links to package changelogs on the default branch remain usable when a root entry is extracted for GitHub release notes.
 
