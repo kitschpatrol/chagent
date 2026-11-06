@@ -6,21 +6,29 @@ import { git, readBlobs, runCommand } from './process'
 import { isVersionOnlyEdit, localDate, LOCKFILE_PATH, manifestAt } from './repository'
 
 const COMMIT_MARKER = '\u{1}'
-const GENERATED_DIRECTORY = /^(?:build|changelog|coverage|dist)(?:\/|$)/iv
-const GENERATED_ANYWHERE = /(?:^|\/)(?:changelog(?:\.md)?$|node_modules(?:\/|$))/iv
+const OUTPUT_DIRECTORY = /^(?:build|changelog|coverage|dist)(?:\/|$)/iv
+const NEVER_SOURCE = /(?:^|\/)(?:changelog(?:\.md)?$|node_modules(?:\/|$))/iv
 
 /**
- * Generated output lives at the top of a package, so `packages/build` and
- * `src/dist` remain source. Lockfiles record resolved versions, not declared
- * dependency ranges.
+ * Changelogs are this tool's own output, installed dependencies are another
+ * project's source, and lockfiles record resolved versions, not declared
+ * dependency ranges. None of them is evidence of a change.
  */
-function ignored(file: string, packages: PackageInfo[]): boolean {
+function excluded(file: string): boolean {
+	return LOCKFILE_PATH.test(file) || NEVER_SOURCE.test(file)
+}
+
+/**
+ * Recognize directories at the top of a package that usually hold generated
+ * output, so `packages/build` and `src/dist` remain source. Supplied commits
+ * leave them out, but they still count as changes to research: only the agent
+ * can tell a build artifact from a project whose source lives in `coverage`.
+ */
+function likelyGenerated(file: string, packages: PackageInfo[]): boolean {
 	// Packages are sorted by directory, so the last match is the most deeply nested owner.
 	const owner = packages.findLast(({ directory }) => file.startsWith(`${directory}/`))
 	const relative = owner === undefined ? file : file.slice(owner.directory.length + 1)
-	return (
-		LOCKFILE_PATH.test(file) || GENERATED_ANYWHERE.test(file) || GENERATED_DIRECTORY.test(relative)
-	)
+	return OUTPUT_DIRECTORY.test(relative)
 }
 
 /**
@@ -119,7 +127,10 @@ async function commitsInRange(
 	return commits.values().toArray()
 }
 
-/** Collect source changes, excluding generated notes and release-only commits. */
+/**
+ * Collect a release's starting evidence, or nothing when its range holds only
+ * changelogs, lockfiles, and version bookkeeping.
+ */
 export async function collectEvidence(
 	repository: Repository,
 	pkg: PackageInfo,
@@ -149,9 +160,7 @@ export async function collectEvidence(
 		'--',
 		...paths,
 	])
-	const candidates = changedOutput
-		.split('\0')
-		.filter((file) => file !== '' && !ignored(file, packages))
+	const candidates = changedOutput.split('\0').filter((file) => file !== '' && !excluded(file))
 	const rangeBlobs = await readBlobs(root, manifestObjects(candidates, from, release.ref))
 	const changed = new Set(
 		candidates.filter(
@@ -170,22 +179,24 @@ export async function collectEvidence(
 	const commits = await commitsInRange(root, range, paths)
 	const sourceCommits = commits.map((item) => ({
 		...item,
-		files: item.files.filter((file) => !ignored(file, packages)),
+		files: item.files.filter((file) => !excluded(file) && !likelyGenerated(file, packages)),
 	}))
 	const commitBlobs = await readBlobs(
 		root,
 		sourceCommits.flatMap(({ files, id }) => manifestObjects(files, `${id}^`, id)),
 	)
-	const evidence: Evidence[] = sourceCommits
-		.filter(
-			({ files, id }) =>
-				files.some((file) => changed.has(file)) && hasSourceChanges(files, id, commitBlobs),
-		)
-		.map(({ files, id, message }) => ({
-			id,
-			kind: 'commit',
-			text: `${message}\nFiles: ${files.join(', ')}`,
-		}))
+	const evidence: Evidence[] = [
+		{
+			id: `range:${from}..${release.ref}`,
+			kind: 'range',
+			text: `Research the complete Git range ${range} using git log, git diff, git show, and git ls-tree. The supplied commits are a starting point, not a complete description of changes. Follow the scope and exclusions in repository.`,
+		},
+	]
+	for (const { files, id, message } of sourceCommits) {
+		if (files.some((file) => changed.has(file)) && hasSourceChanges(files, id, commitBlobs)) {
+			evidence.push({ id, kind: 'commit', text: `${message}\nFiles: ${files.join(', ')}` })
+		}
+	}
 
 	if (release.pending === true) {
 		const file = path.posix.join(pkg.directory, 'package.json')
@@ -200,14 +211,6 @@ export async function collectEvidence(
 		if (diff !== '') {
 			evidence.push({ id: `manifest:${file}`, kind: 'manifest', text: diff })
 		}
-	}
-
-	if (evidence.length > 0) {
-		evidence.unshift({
-			id: `range:${from}..${release.ref}`,
-			kind: 'range',
-			text: `Research the complete Git range ${range} using git log, git diff, git show, and git ls-tree. The supplied commits are a starting point, not a complete description of changes. Follow the scope and exclusions in repository.`,
-		})
 	}
 
 	return evidence

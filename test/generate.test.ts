@@ -66,6 +66,27 @@ describe('generation and writing', () => {
 		},
 	)
 
+	it('asks the agent about a release whose only changes are in a directory that usually holds generated output', async () => {
+		const root = await createRepository(
+			{ 'coverage/core.py': 'def run():\n    return 1\n', 'readme.md': 'A tool.\n' },
+			false,
+		)
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'coverage/core.py': 'def run():\n    return 2\n' })
+		await commit(root, 'Fix the result of run().')
+		await git(root, ['tag', 'v1.0.1'])
+		const agent = fixtureAgent()
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		const requested = agent.generate.mock.calls[0]![0].releases.find(
+			(release) => release.version === '1.0.1',
+		)
+		expect(requested?.evidence.map((item) => item.kind)).toEqual(['range'])
+		const [latest] = parseChangelog(plan.files[0]!.after).sections
+		expect(latest?.version).toBe('1.0.1')
+		expect(latest?.body).toContain('Improve ')
+		expect(latest?.body).not.toContain('No notable changes.')
+	})
+
 	it('supports explicitly configured non-npm workspace directories and their tags', async () => {
 		const root = await createRepository(
 			{

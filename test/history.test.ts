@@ -91,7 +91,7 @@ describe('release history', () => {
 		expect(await collectEvidence(repository, repository.rootPackage, release)).toEqual([])
 	})
 
-	it('excludes generated output only at the top of a package', async () => {
+	it('leaves likely generated output out of supplied commits only at the top of a package', async () => {
 		const root = await createRepository({
 			'packages/build/dist/out.js': 'export const generated = 1\n',
 			'packages/build/package.json': '{"name":"@example/build","version":"1.0.0"}',
@@ -115,18 +115,23 @@ describe('release history', () => {
 		)
 	})
 
-	it.each(['dist/out.js', 'coverage/report.txt', 'docs/CHANGELOG.md'])(
-		'ignores a commit that only touches %s',
-		async (file) => {
+	it.each([
+		['dist/out.js', ['range']],
+		['coverage/report.txt', ['range']],
+		['build/core.py', ['range']],
+		['docs/CHANGELOG.md', []],
+		['node_modules/dependency/index.js', []],
+	])(
+		'leaves a commit that only touches %s for the agent to judge, unless it cannot be source',
+		async (file, kinds) => {
 			const root = await createRepository()
 			await git(root, ['tag', 'v1.0.0'])
 			await writeFiles(root, { [file]: 'Generated.\n' })
 			await commit(root, 'Regenerate output.')
 			const repository = await inspectRepository(root)
 			const releases = await resolveReleases(repository, repository.rootPackage, {})
-			expect(await collectEvidence(repository, repository.rootPackage, releases.at(-1)!)).toEqual(
-				[],
-			)
+			const evidence = await collectEvidence(repository, repository.rootPackage, releases.at(-1)!)
+			expect(evidence.map((item) => item.kind)).toEqual(kinds)
 		},
 	)
 

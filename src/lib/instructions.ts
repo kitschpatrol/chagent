@@ -26,7 +26,11 @@ manager, manifest format, or directory layout. Use snapshots at those refs, not
 uncommitted files or newer code at HEAD. Respect repository.directory and
 repository.excludeDirectories when deciding which changes belong in this entry;
 you may inspect related files for context. The supplied evidence is a starting
-point, not a limit on your research.
+point, not a limit on your research. Supplied commits leave out lockfiles and
+directories named build, coverage, dist, or changelog at the top of a package,
+which usually hold generated output. Judge those directories yourself: when one
+holds a project's source rather than generated output, its changes belong in the
+changelog like any others.
 
 When mode is initialize, reconstruct this release as part of the project's full
 historical changelog. When mode is update, cover all missing changes in the supplied range. In both modes, review
