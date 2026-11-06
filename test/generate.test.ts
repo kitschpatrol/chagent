@@ -591,6 +591,32 @@ describe('generation and writing', () => {
 		expect(release?.body).not.toContain('@example/b')
 	})
 
+	it('researches only the bumped release of a shared-version workspace with existing history', async () => {
+		const root = await createRepository({
+			'packages/a/index.js': 'export const a = 1\n',
+			'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',
+			'packages/b/package.json': '{"name":"@example/b","version":"1.0.0"}',
+			'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+		})
+		await git(root, ['tag', 'v1.0.0'])
+		const agent = fixtureAgent()
+		await writeChangelog(await generateChangelog({ agent, cwd: root, github: false }))
+		await writeFiles(root, { 'packages/a/index.js': 'export const a = 2\n' })
+		await commit(root, 'Improve a.')
+		await writeFiles(root, {
+			'package.json': '{"engines":{"node":">=18"},"name":"example","version":"1.0.1"}',
+			'packages/a/package.json': '{"name":"@example/a","version":"1.0.1"}',
+			'packages/b/package.json': '{"name":"@example/b","version":"1.0.1"}',
+		})
+		agent.generate.mockClear()
+		await generateChangelog({ agent, cwd: root, github: false })
+		const researched = agent.generate.mock.calls.flatMap(([request]) =>
+			request.releases.map((release) => release.version),
+		)
+		expect(researched).toContain('1.0.1')
+		expect(researched).not.toContain('1.0.0')
+	})
+
 	it('uses package-qualified root entries for independent versions', async () => {
 		const root = await createRepository({
 			'packages/a/package.json': '{"name":"@example/a","version":"1.0.0"}',
@@ -666,6 +692,13 @@ describe('generation and writing', () => {
 		expect(
 			agent.generate.mock.calls.some(([request]) =>
 				request.releases.some((release) => release.scope === 'repository'),
+			),
+		).toBe(true)
+		expect(
+			agent.generate.mock.calls.some(([request]) =>
+				request.releases.some(
+					(release) => release.packageName === '@example/a' && release.version === '1.0.0',
+				),
 			),
 		).toBe(true)
 	})

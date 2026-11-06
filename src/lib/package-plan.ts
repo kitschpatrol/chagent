@@ -140,7 +140,7 @@ export async function preparePackage(
 	context: Context,
 	pkg: PackageInfo,
 	aggregateHistory = false,
-	aggregateContent?: string,
+	recordedAtRoot?: (summary: ReleaseSummary) => boolean,
 ): Promise<PackagePlan> {
 	const { repository } = context
 	const file = await findChangelog(path.join(repository.root, pkg.directory))
@@ -180,11 +180,7 @@ export async function preparePackage(
 		}
 		summaries.push(summary)
 		// Retain release boundaries without regenerating summaries already present at the root.
-		if (
-			!shouldWrite &&
-			aggregateContent !== undefined &&
-			missingPackageSummaries([summary], aggregateContent).length === 0
-		) {
+		if (!shouldWrite && recordedAtRoot?.(summary) === true) {
 			continue
 		}
 

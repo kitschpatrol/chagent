@@ -268,21 +268,19 @@ export async function generateWorkspace(context: Context): Promise<void> {
 	)
 	const shared = rootReleases.some((release) => release.version !== 'Unreleased')
 	const rootFile = await findChangelog(repository.root)
+	const rootContent = options.rebuild ? undefined : rootFile.content
+	const rootMissing = shared
+		? new Set(missingReleases(rootReleases, rootContent).map((release) => release.version))
+		: undefined
 	const needsPackageHistory =
-		!shared ||
-		missingReleases(rootReleases, options.rebuild ? undefined : rootFile.content).some(
-			(release) => release.version !== 'Unreleased',
-		)
+		rootMissing === undefined || rootMissing.values().some((version) => version !== 'Unreleased')
+	const recordedAtRoot = (summary: ReleaseSummary): boolean =>
+		rootMissing === undefined
+			? rootContent !== undefined && missingPackageSummaries([summary], rootContent).length === 0
+			: !rootMissing.has(summary.version)
 	const packages: PackagePlan[] = []
 	for (const pkg of repository.packages) {
-		packages.push(
-			await preparePackage(
-				context,
-				pkg,
-				needsPackageHistory,
-				shared || options.rebuild ? undefined : rootFile.content,
-			),
-		)
+		packages.push(await preparePackage(context, pkg, needsPackageHistory, recordedAtRoot))
 	}
 
 	const root = shared ? await preparePackage(context, repository.rootPackage) : undefined

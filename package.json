@@ -49,7 +49,7 @@
 		"clean-deep": "shx rm -f pnpm-lock.yaml && git clean -fdX",
 		"fix": "pnpm build && ksc fix",
 		"lint": "pnpm build && ksc lint",
-		"release": "bumpp --all --commit 'Release: %s' --execute 'node dist/bin/cli.js' && pnpm build && pnpm publish --otp $(op item get npm --otp) && brewpub --tap kitschpatrol/tap --description 'Generate and update changelogs from Git history with Codex or Claude'",
+		"release": "pnpm build && bumpp --all --commit 'Release: %s' --execute 'node dist/bin/cli.js' && pnpm build && pnpm publish --otp $(op item get npm --otp) && brewpub --tap kitschpatrol/tap --description 'Generate and update changelogs from Git history with Codex or Claude'",
 		"test": "pnpm build && vitest run"
 	},
 	"dependencies": {
