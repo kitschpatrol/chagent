@@ -268,13 +268,96 @@ describe('release history', () => {
 		])
 	})
 
-	it.each(['v1', 'v1.x', 'v01.0', 'v1.0.0.0'])('ignores the tag %s', async (tag) => {
+	it('reads v-prefixed one-part version tags alongside more precise ones', async () => {
 		const root = await createRepository()
-		await git(root, ['tag', tag])
+		await git(root, ['tag', 'v1'])
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await commit(root, 'Change the answer.')
+		await git(root, ['tag', 'v1.1'])
+		await writeFiles(root, { 'index.js': 'export const answer = 44\n' })
+		await commit(root, 'Change the answer again.')
+		await git(root, ['tag', 'v2'])
 		const repository = await inspectRepository(root)
 		const releases = await resolveReleases(repository, repository.rootPackage, {})
-		expect(releases.map((release) => release.version)).toEqual(['Unreleased'])
+		expect(releases).toMatchObject([
+			{ tag: 'v1', version: '1.0.0' },
+			{ previousTag: 'v1', tag: 'v1.1', version: '1.1.0' },
+			{ previousTag: 'v1.1', tag: 'v2', version: '2.0.0' },
+		])
 	})
+
+	it.each(['1', 'example@1', 'v1.x', 'v01', 'v01.0', 'v1.0.0.0'])(
+		'ignores the tag %s',
+		async (tag) => {
+			const root = await createRepository()
+			await git(root, ['tag', tag])
+			const repository = await inspectRepository(root)
+			const releases = await resolveReleases(repository, repository.rootPackage, {})
+			expect(releases.map((release) => release.version)).toEqual(['Unreleased'])
+		},
+	)
+
+	it('reads bare one-part version tags through configured tag patterns', async () => {
+		const root = await createRepository()
+		await git(root, ['tag', '1'])
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {
+			tagPatterns: ['{version}'],
+		})
+		expect(releases).toMatchObject([{ tag: '1', version: '1.0.0' }])
+	})
+
+	it.each([
+		['v1', 'v1.2.0', '1.2.0'],
+		['v1', 'v1.0', '1.0.0'],
+		['v1.2', 'v1.2.1', '1.2.1'],
+	])('ignores %s on the same commit as the more precise %s', async (floating, precise, version) => {
+		const root = await createRepository()
+		await git(root, ['tag', precise])
+		await git(root, ['tag', floating])
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		expect(releases).toMatchObject([{ tag: precise, version }])
+	})
+
+	it('reads a one-part tag that follows prereleases of its release', async () => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0-beta.1'])
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await commit(root, 'Change the answer.')
+		await git(root, ['tag', 'v1'])
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		expect(releases).toMatchObject([
+			{ tag: 'v1.0.0-beta.1', version: '1.0.0-beta.1' },
+			{ previousTag: 'v1.0.0-beta.1', tag: 'v1', version: '1.0.0' },
+		])
+	})
+
+	it.each(['v1.2.0', 'v2.1.0'])(
+		'reads a two-part tag from a merged maintenance branch despite %s on main',
+		async (later) => {
+			const root = await createRepository()
+			await git(root, ['tag', 'v1.0.0'])
+			await git(root, ['checkout', '-q', '-b', 'maintenance'])
+			await writeFiles(root, { 'maintenance.txt': 'Backport.\n' })
+			await commit(root, 'Backport a fix.')
+			await git(root, ['tag', 'v1.1'])
+			await git(root, ['checkout', '-q', 'main'])
+			await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+			await commit(root, 'Change the answer.')
+			await git(root, ['tag', later])
+			await git(root, ['merge', '--no-ff', '-m', 'Merge maintenance.', 'maintenance'])
+			const repository = await inspectRepository(root)
+			const releases = await resolveReleases(repository, repository.rootPackage, {})
+			expect(releases.map((release) => release.tag ?? release.version)).toEqual([
+				'v1.0.0',
+				'v1.1',
+				later,
+				'Unreleased',
+			])
+		},
+	)
 
 	it('prefers full version tags over two-part tags for the same release', async () => {
 		const root = await createRepository()

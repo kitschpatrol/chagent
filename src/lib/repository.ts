@@ -17,7 +17,10 @@ export const LOCKFILE_PATH =
 	/(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|deno\.lock|uv\.lock|poetry\.lock|pdm\.lock|Pipfile\.lock|Cargo\.lock|Gemfile\.lock|composer\.lock|go\.sum)$/v
 const TAG_DECORATION = 'tag: refs/tags/'
 const GITHUB_REMOTE = /github\.com[:\/]([^\/]+\/[^\/]+?)(?:\.git)?$/v
-const MAJOR_MINOR = /^\d+\.\d+$/v
+const SHORT_VERSION = /^\d+(?:\.\d+)?$/v
+
+type TagVersion = { precision: number; version: string }
+type TagCandidate = TagVersion & { tag: Repository['tags'][number] }
 
 const manifestSchema = z.object({
 	dependencies: z.record(z.string(), z.string()).optional(),
@@ -228,14 +231,10 @@ function packageInfo(
 }
 
 /**
- * Read the version a tag names. Two-part versions such as `1.0` name the `.0`
- * patch release and are marked partial.
+ * Read the version a tag names, with how many of its parts the tag spells out.
+ * Short versions such as `1` or `1.2` name the first release of their series.
  */
-function tagVersion(
-	tag: string,
-	pkg: PackageInfo,
-	patterns?: string[],
-): undefined | { partial: boolean; version: string } {
+function tagVersion(tag: string, pkg: PackageInfo, patterns?: string[]): TagVersion | undefined {
 	const templates = patterns ?? ['{name}@{version}', '{name}/v{version}', 'v{version}', '{version}']
 	for (const pattern of templates) {
 		const expanded = pattern.replaceAll('{name}', () => pkg.name)
@@ -247,20 +246,58 @@ function tagVersion(
 		const value = tag.slice(prefix.length, suffix === '' ? undefined : -suffix.length)
 		const version = semver.valid(value)
 		if (version !== null) {
-			return { partial: false, version }
+			return { precision: 3, version }
 		}
 
-		if (!MAJOR_MINOR.test(value)) {
+		if (!SHORT_VERSION.test(value)) {
 			continue
 		}
 
-		const padded = semver.valid(`${value}.0`)
+		const parts = value.split('.')
+		// Bare numbers are often build or date tags, so default patterns need a v.
+		if (patterns === undefined && parts.length === 1 && !prefix.endsWith('v')) {
+			continue
+		}
+
+		const padded = semver.valid([...parts, '0', '0'].slice(0, 3).join('.'))
 		if (padded !== null) {
-			return { partial: true, version: padded }
+			return { precision: parts.length, version: padded }
 		}
 	}
 
 	return undefined
+}
+
+/**
+ * Check that a short tag such as `v1` or `v1.2` precedes every more precise tag
+ * in its series. Floating tags that follow the latest release fail this check.
+ */
+async function leadsSeries(
+	root: string,
+	candidate: TagCandidate,
+	candidates: TagCandidate[],
+): Promise<boolean> {
+	const major = semver.major(candidate.version)
+	const minor = semver.minor(candidate.version)
+	for (const other of candidates) {
+		if (
+			other.precision <= candidate.precision ||
+			semver.major(other.version) !== major ||
+			(candidate.precision === 2 && semver.minor(other.version) !== minor) ||
+			semver.lt(other.version, candidate.version)
+		) {
+			continue
+		}
+
+		if (
+			other.tag.commit === candidate.tag.commit ||
+			!(await isAncestor(root, candidate.tag.commit, other.tag.commit))
+		) {
+			return false
+		}
+	}
+
+	return true
 }
 
 /**
@@ -505,18 +542,13 @@ async function taggedReleases(
 	pkg: PackageInfo,
 	config: Pick<Config, 'tagPatterns'>,
 ): Promise<Release[]> {
-	const candidates: Array<{ partial: boolean; tag: Repository['tags'][number]; version: string }> =
-		[]
+	const candidates: TagCandidate[] = []
 	for (const tag of repository.tags) {
 		const match = tagVersion(tag.name, pkg, config.tagPatterns)
 		if (match !== undefined) {
 			candidates.push({ ...match, tag })
 		}
 	}
-
-	const fullVersions = new Set(
-		candidates.filter((candidate) => !candidate.partial).map((candidate) => candidate.version),
-	)
 
 	const isRoot = pkg.directory === '.'
 	const manifests = isRoot
@@ -526,28 +558,36 @@ async function taggedReleases(
 				pkg.directory,
 				candidates.map(({ tag }) => tag.commit),
 			)
-	const releases: Release[] = []
-	for (const { partial, tag, version } of candidates) {
-		// A two-part tag such as v1.0 may float, so a full version tag takes precedence.
-		if (partial && fullVersions.has(version)) {
-			continue
-		}
-
+	const owned: TagCandidate[] = []
+	for (const candidate of candidates) {
 		if (!isRoot) {
-			const manifest = manifests.get(tag.commit)
-			if (manifest?.version !== undefined && semver.valid(manifest.version) !== version) {
+			const manifest = manifests.get(candidate.tag.commit)
+			if (manifest?.version !== undefined && semver.valid(manifest.version) !== candidate.version) {
 				continue
 			}
 
 			if (
 				manifest === undefined &&
-				(await git(repository.root, ['cat-file', '-t', `${tag.commit}:${pkg.directory}`], true)) !==
-					'tree'
+				(await git(
+					repository.root,
+					['cat-file', '-t', `${candidate.tag.commit}:${pkg.directory}`],
+					true,
+				)) !== 'tree'
 			) {
 				continue
 			}
 		}
 
+		owned.push(candidate)
+	}
+
+	const releases: Release[] = []
+	for (const candidate of owned) {
+		if (candidate.precision < 3 && !(await leadsSeries(repository.root, candidate, owned))) {
+			continue
+		}
+
+		const { tag, version } = candidate
 		const existing = releases.find((release) => release.version === version)
 		if (existing && existing.ref !== tag.commit) {
 			throw new Error(

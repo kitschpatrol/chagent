@@ -281,7 +281,7 @@ Importing `defineConfig` requires chagent in the repository's own dependencies. 
 
 Also supported: `chagent.config.mjs`, `chagent.config.js`, `chagent.config.json`, or a `chagent` key in `package.json`. CLI flags override configured values. `--config` selects a specific file.
 
-Use `packages` and `exclude` directory globs to customize workspace discovery, and `skipPackage` to leave discovered packages without changelogs. Use `tagPatterns` to select unusual release tag conventions. Templates support `{name}` and `{version}`; defaults recognize `v1.2.3`, `1.2.3`, `@scope/package@1.2.3`, and `@scope/package/v1.2.3`. Two-part versions such as `v1.2` name the `1.2.0` release unless a full version tag already names it.
+Use `packages` and `exclude` directory globs to customize workspace discovery, and `skipPackage` to leave discovered packages without changelogs. Use `tagPatterns` to select unusual release tag conventions. Templates support `{name}` and `{version}`; defaults recognize `v1.2.3`, `1.2.3`, `@scope/package@1.2.3`, and `@scope/package/v1.2.3`. Short versions such as `v1` and `v1.2` name the `1.0.0` and `1.2.0` releases when they precede every more precise tag in their series, so floating tags that track the latest release are ignored. Default patterns read one-part versions only after a `v`; configure `tagPatterns` to read bare numbers such as `1`.
 
 ## Background
 
