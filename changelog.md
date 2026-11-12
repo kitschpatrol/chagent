@@ -5,12 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.6.0] - 2026-11-12
 
 ### Fixed
 
 - Follow Git ancestry when ordering releases and choosing comparison boundaries, so fork releases can follow an upstream version with higher SemVer precedence.
 - Recognize pending fork version bumps and backfill missing reachable releases in package changelogs and workspace summaries without rewriting recorded entries.
+- Validate Git release boundaries for every recorded changelog section, including older headings, before updating.
+
+### Documentation
+
+- Explain Git ancestry ordering, SemVer tie-breaking, fork releases, and historical backfills that preserve recorded section text.
+
+### Maintenance
+
+- Update the `@clack/prompts` runtime dependency to `^1.9.0`.
+- Update tsdown to `^0.23.7` and pnpm to `12.18.0`, and remove shared-config release-age exceptions.
+- Enable tsdown's bundled agent skill and configure package-provided skills to install only in `.agents/skills`.
+- Normalize workspace test paths for Windows and expand regression coverage for release ordering, pending version bumps, and historical backfills.
 
 ## [0.5.0] - 2026-11-06
 
@@ -117,3 +129,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.3.0]: https://github.com/kitschpatrol/chagent/compare/v0.2.0...v0.3.0
 [0.4.0]: https://github.com/kitschpatrol/chagent/compare/v0.3.0...v0.4.0
 [0.5.0]: https://github.com/kitschpatrol/chagent/compare/v0.4.0...v0.5.0
+[0.6.0]: https://github.com/kitschpatrol/chagent/compare/v0.5.0...v0.6.0
