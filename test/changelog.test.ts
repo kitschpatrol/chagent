@@ -199,6 +199,25 @@ describe('package links', () => {
 })
 
 describe('changelog rendering', () => {
+	it('inserts a missing historical release at its Git boundary without rewriting existing text', () => {
+		const newer = '## 1.2.0-fork.3\n\n* Keep  the newest entry.\n\n'
+		const older = '## 1.2.0\n\n* Keep  the upstream entry.\n'
+		const result = updateMarkdown(
+			changelogHeader + '\n' + newer + older,
+			[{ changes: [change], release: { ref: 'abc', version: '1.2.0-fork.2' } }],
+			false,
+			undefined,
+			['1.2.0', '1.2.0-fork.2', '1.2.0-fork.3'],
+		)
+		expect(parseChangelog(result).sections.map(({ version }) => version)).toEqual([
+			'1.2.0-fork.3',
+			'1.2.0-fork.2',
+			'1.2.0',
+		])
+		expect(result).toContain(newer)
+		expect(result).toContain(older)
+	})
+
 	it('creates the exact canonical header', () => {
 		const result = updateMarkdown(
 			undefined,

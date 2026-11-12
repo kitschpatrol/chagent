@@ -323,19 +323,23 @@ export function updateMarkdown(
 	entries: SectionEntry[],
 	nodeException: boolean,
 	github?: string,
+	releaseOrder?: string[],
 ): string {
 	const content = original ?? changelogHeader
 	const parsed = parseChangelog(content)
 	const { newline } = parsed
 	const header = addNodeNote(parsed.header, newline, nodeException)
 
-	const additions: string[] = []
+	const additions: Array<{ text: string; version: string }> = []
 	const definitions: string[] = []
 	let { footer } = parsed
 	const draft = parsed.sections.find((section) => section.version === 'Unreleased')
 	const released = parsed.sections
 		.filter((section) => section.version !== 'Unreleased')
-		.map((section) => content.slice(section.start, section.end))
+		.map((section) => ({
+			text: content.slice(section.start, section.end),
+			version: section.version,
+		}))
 	let draftText = draft === undefined ? '' : content.slice(draft.start, draft.end)
 	for (const entry of entries) {
 		const { existingBody, release } = entry
@@ -360,7 +364,7 @@ export function updateMarkdown(
 		if (release.version === 'Unreleased') {
 			draftText = section
 		} else {
-			additions.push(section)
+			additions.push({ text: section, version: release.version })
 			if (existingBody !== undefined) {
 				draftText = ''
 			}
@@ -390,12 +394,16 @@ export function updateMarkdown(
 		footer = footer.replace(UNRELEASED_REFERENCE, '')
 	}
 
-	const generated =
-		sectionSpacing(sectionSpacing(header, newline) + draftText, newline) +
-		additions.toReversed().join('')
-	const preserved = released.join('') + footer
-	const result = preserved === '' ? generated.trimEnd() + newline : generated + preserved
-	return appendDefinitions(result, footer, definitions, newline)
+	const sections = [...additions.toReversed(), ...released]
+	if (releaseOrder !== undefined) {
+		const positions = new Map(releaseOrder.map((version, index) => [version, index]))
+		sections.sort((a, b) => (positions.get(b.version) ?? -1) - (positions.get(a.version) ?? -1))
+	}
+
+	const generated = sectionSpacing(sectionSpacing(header, newline) + draftText, newline)
+	const result = generated + sections.map((section) => section.text).join('') + footer
+	const terminated = footer === '' && released.length === 0 ? result.trimEnd() + newline : result
+	return appendDefinitions(terminated, footer, definitions, newline)
 }
 
 /** Add link reference definitions after any existing footer. */

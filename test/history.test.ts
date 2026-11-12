@@ -1,10 +1,92 @@
 import { describe, expect, it, vi } from 'vitest'
 import { collectEvidence } from '../src/lib/evidence'
-import { git, readBlobs } from '../src/lib/process'
+import { git, readBlobs, runCommand } from '../src/lib/process'
 import { hasNodeException, inspectRepository, resolveReleases } from '../src/lib/repository'
 import { commit, createRepository, writeFiles } from './helpers'
 
 describe('release history', () => {
+	it('orders fork releases after their upstream release and uses adjacent Git boundaries', async () => {
+		const root = await createRepository({ 'package.json': '{"name":"example","version":"1.2.0"}' })
+		await git(root, ['tag', '1.2.0'])
+		for (const version of ['1.2.0-fork.1', '1.2.0-fork.2']) {
+			await writeFiles(root, { 'package.json': JSON.stringify({ name: 'example', version }) })
+			await commit(root, `Release: ${version}`)
+			await git(root, ['tag', version])
+		}
+
+		let repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		expect(releases.map(({ version }) => version)).toEqual([
+			'1.2.0',
+			'1.2.0-fork.1',
+			'1.2.0-fork.2',
+		])
+		expect(releases[1]?.previousTag).toBe('1.2.0')
+		expect(releases[2]?.previousTag).toBe('1.2.0-fork.1')
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await commit(root, 'Improve the fork.')
+		repository = await inspectRepository(root)
+		const unreleased = await resolveReleases(repository, repository.rootPackage, {})
+		expect(unreleased.at(-1)).toMatchObject({
+			previousTag: '1.2.0-fork.2',
+			version: 'Unreleased',
+		})
+		await writeFiles(root, { 'package.json': '{"name":"example","version":"1.2.0-fork.3"}' })
+		for (const committed of [false, true]) {
+			if (committed) {
+				await commit(root, 'Release: 1.2.0-fork.3')
+			}
+
+			repository = await inspectRepository(root)
+			const bumped = await resolveReleases(repository, repository.rootPackage, {})
+			expect(bumped.at(-1)).toMatchObject({
+				pending: true,
+				previousTag: '1.2.0-fork.2',
+				tag: '1.2.0-fork.3',
+				version: '1.2.0-fork.3',
+			})
+		}
+	})
+
+	it('does not mistake a previously tagged manifest version for a pending release', async () => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'package.json': '{"name":"example","version":"1.1.0"}' })
+		await commit(root, 'Release: 1.1.0')
+		await git(root, ['tag', 'v1.1.0'])
+		await writeFiles(root, { 'package.json': '{"name":"example","version":"1.0.0"}' })
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		expect(releases.at(-1)?.version).toBe('1.1.0')
+	})
+
+	it('uses SemVer to order different version tags on the same commit', async () => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		await git(root, ['tag', 'v1.0.0-beta.1'])
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		expect(releases.map(({ version }) => version)).toEqual(['1.0.0-beta.1', '1.0.0'])
+	})
+
+	it('uses ancestry despite release commit dates running backward', async () => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'index.js': 'export const answer = 43\n' })
+		await git(root, ['add', '--all'])
+		// eslint-disable-next-line ts/naming-convention -- Git requires this environment variable name.
+		const env = { ...process.env, GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z' }
+		await runCommand('git', ['commit', '-m', 'Release the fork with an earlier clock.'], {
+			cwd: root,
+			env,
+		})
+		await git(root, ['tag', 'v1.0.0-fork.1'])
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		expect(releases.map(({ version }) => version)).toEqual(['1.0.0', '1.0.0-fork.1'])
+		expect(releases[1]?.previousTag).toBe('v1.0.0')
+	})
+
 	it('includes the initial release and uses the predecessor of a tag at HEAD', async () => {
 		const root = await createRepository()
 		await git(root, ['tag', 'v1.0.0'])
@@ -355,12 +437,12 @@ describe('release history', () => {
 			await git(root, ['merge', '--no-ff', '-m', 'Merge maintenance.', 'maintenance'])
 			const repository = await inspectRepository(root)
 			const releases = await resolveReleases(repository, repository.rootPackage, {})
-			expect(releases.map((release) => release.tag ?? release.version)).toEqual([
-				'v1.0.0',
-				'v1.1',
-				later,
-				'Unreleased',
-			])
+			expect(new Set(releases.map((release) => release.tag ?? release.version))).toEqual(
+				new Set([later, 'Unreleased', 'v1.0.0', 'v1.1']),
+			)
+			expect(releases.find((release) => release.tag === 'v1.1')?.previousTag).toBe('v1.0.0')
+			expect(releases.find((release) => release.tag === later)?.previousTag).toBe('v1.0.0')
+			expect(releases.at(-1)?.version).toBe('Unreleased')
 		},
 	)
 
@@ -403,6 +485,19 @@ describe('release history', () => {
 		const repository = await inspectRepository(root)
 		const releases = await resolveReleases(repository, repository.rootPackage, {})
 		expect(releases.map((release) => release.version)).toEqual(['2.0.0'])
+	})
+
+	it('prefers a tag at HEAD over a committed bump of unrelated root tooling', async () => {
+		const root = await createRepository({
+			'package.json': '{"name":"docs-tooling","version":"0.0.0"}',
+		})
+		await git(root, ['tag', 'v1.0.0'])
+		await writeFiles(root, { 'package.json': '{"name":"docs-tooling","version":"0.0.1"}' })
+		await commit(root, 'Update tooling and release the project.')
+		await git(root, ['tag', 'v2.0.0'])
+		const repository = await inspectRepository(root)
+		const releases = await resolveReleases(repository, repository.rootPackage, {})
+		expect(releases.map(({ version }) => version)).toEqual(['1.0.0', '2.0.0'])
 	})
 
 	it.each([

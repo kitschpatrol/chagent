@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- Follow Git ancestry when ordering releases and choosing comparison boundaries, so fork releases can follow an upstream version with higher SemVer precedence.
+- Recognize pending fork version bumps and backfill missing reachable releases in package changelogs and workspace summaries without rewriting recorded entries.
+
 ## [0.5.0] - 2026-11-06
 
 ### Added

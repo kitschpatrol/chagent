@@ -32,7 +32,7 @@ import {
 	renderPackage,
 } from './package-plan'
 import { git } from './process'
-import { describedPackages, resolveReleases } from './repository'
+import { describedPackages, resolveReleases, sortReleases } from './repository'
 
 /** A root changelog with a section for each package release. */
 type IndependentPlan = {
@@ -124,17 +124,21 @@ async function prepareIndependent(
  * Write a section for each package release the root does not record yet, and
  * keep the draft's links to packages with unreleased changes current.
  */
-function renderIndependent(
+async function renderIndependent(
 	context: Context,
 	prepared: IndependentPlan,
 	results: Map<string, Change[]>,
 	summaries: ReleaseSummary[],
 	exception: boolean,
-): void {
+): Promise<void> {
 	const { plan, repository } = context
 	const { content, draft, file, unreleased } = prepared
+	const ordered = await sortReleases(
+		repository,
+		summaries.filter((summary) => summary.version !== 'Unreleased'),
+	)
 	const entries: SectionEntry[] = Array.from(
-		missingPackageSummaries(summaries, content),
+		missingPackageSummaries(ordered, content),
 		(summary) => ({
 			changes: results.get(summaryId(summary)) ?? [],
 			links: packageLink(repository, summary),
@@ -156,7 +160,13 @@ function renderIndependent(
 		entries.push({ changes, existingBody: draft, links, release: unreleased.release, revise })
 	}
 
-	const after = updateMarkdown(content, entries, exception, repository.github)
+	const after = updateMarkdown(
+		content,
+		entries,
+		exception,
+		repository.github,
+		ordered.map((summary) => `${summary.packageName}@${summary.version}`),
+	)
 	if (after !== file.content) {
 		plan.files.push({ after, before: file.content, path: file.path })
 	}
@@ -240,6 +250,6 @@ export async function generateWorkspace(context: Context): Promise<void> {
 					.flatMap((summary) => packageLink(repository, summary)),
 		)
 	} else if (independent !== undefined) {
-		renderIndependent(context, independent, results, summaries, exception)
+		await renderIndependent(context, independent, results, summaries, exception)
 	}
 }

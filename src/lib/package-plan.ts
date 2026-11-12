@@ -140,7 +140,7 @@ export function leavesGeneratedDraft(entries: SectionEntry[], previously: boolea
 	)
 }
 
-/** Select the releases newer than anything the changelog already records. */
+/** Select every reachable release the changelog does not already record. */
 export function missingReleases(releases: Release[], content = ''): Release[] {
 	const { sections } = parseChangelog(content)
 	const known = new Set(sections.map((section) => section.version))
@@ -154,17 +154,16 @@ export function missingReleases(releases: Release[], content = ''): Release[] {
 		)
 	}
 
-	const newest = recorded.toSorted(semver.rcompare)[0]
-	if (newest !== undefined && releases.every((release) => release.version !== newest)) {
-		throw new Error(
-			`Cannot locate the Git release boundary for existing changelog version ${newest}. Fetch its tags or configure tagPatterns.`,
-		)
+	for (const version of recorded) {
+		if (releases.every((release) => release.version !== version)) {
+			throw new Error(
+				`Cannot locate the Git release boundary for existing changelog version ${version}. Fetch its tags or configure tagPatterns.`,
+			)
+		}
 	}
 
 	return releases.filter(
-		(release) =>
-			release.version === 'Unreleased' ||
-			(!known.has(release.version) && (newest === undefined || semver.gt(release.version, newest))),
+		(release) => release.version === 'Unreleased' || !known.has(release.version),
 	)
 }
 
@@ -314,7 +313,13 @@ export function renderPackage(
 		}
 	}
 
-	const after = updateMarkdown(content, entries, exception, repository.github)
+	const after = updateMarkdown(
+		content,
+		entries,
+		exception,
+		repository.github,
+		releases.map((release) => release.version),
+	)
 	if (after !== file.content) {
 		plan.files.push({ after, before: file.content, path: file.path })
 	}
@@ -354,22 +359,8 @@ export function missingPackageSummaries(
 ): ReleaseSummary[] {
 	const parsed = parseChangelog(content)
 	const known = new Set(parsed.sections.map((section) => section.version))
-	return summaries
-		.toSorted((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999'))
-		.filter((summary) => {
-			if (
-				summary.version === 'Unreleased' ||
-				known.has(`${summary.packageName}@${summary.version}`)
-			) {
-				return false
-			}
-
-			return parsed.sections.every((section) => {
-				const prefix = summary.packageName + '@'
-				const version = section.version.startsWith(prefix)
-					? section.version.slice(prefix.length)
-					: ''
-				return semver.valid(version) === null || semver.lt(version, summary.version)
-			})
-		})
+	return summaries.filter(
+		(summary) =>
+			summary.version !== 'Unreleased' && !known.has(`${summary.packageName}@${summary.version}`),
+	)
 }

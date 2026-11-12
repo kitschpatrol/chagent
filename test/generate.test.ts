@@ -38,6 +38,91 @@ function fixtureAgent(category: Category = 'Changed'): AgentAdapter & {
 }
 
 describe('generation and writing', () => {
+	it('fills a historical gap even when the latest release is already recorded', async () => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		for (const version of ['1.1.0', '1.2.0']) {
+			await writeFiles(root, { 'index.js': `export const version = '${version}'\n` })
+			await commit(root, `Release: ${version}`)
+			await git(root, ['tag', `v${version}`])
+		}
+
+		await writeFiles(root, {
+			'changelog.md': '# Changelog\n\n## 1.2.0\n\n- Latest.\n\n## 1.0.0\n\n- First.\n',
+		})
+		const agent = fixtureAgent()
+		const plan = await generateChangelog({ agent, cwd: root, github: false })
+		expect(
+			agent.generate.mock.calls.flatMap(([request]) =>
+				request.releases.map(({ version }) => version),
+			),
+		).toEqual(['1.1.0'])
+		expect(parseChangelog(plan.files[0]!.after).sections.map(({ version }) => version)).toEqual([
+			'1.2.0',
+			'1.1.0',
+			'1.0.0',
+		])
+	})
+
+	it.each(['root', 'shared', 'independent'])(
+		'backfills fork releases and preserves existing sections in a %s changelog',
+		async (mode) => {
+			const directory = mode === 'root' ? '' : 'packages/a/'
+			const packageName = mode === 'root' ? 'example' : '@example/a'
+			const qualified = (version: string) =>
+				mode === 'independent' ? `${packageName}@${version}` : version
+			const root = await createRepository({
+				[`${directory}package.json`]: JSON.stringify({ name: packageName, version: '1.2.0' }),
+				...(directory !== '' && { 'pnpm-workspace.yaml': 'packages:\n  - packages/*\n' }),
+			})
+			await git(root, ['tag', qualified('1.2.0')])
+			for (const version of ['1.2.0-fork.1', '1.2.0-fork.2', '1.2.0-fork.3']) {
+				await writeFiles(root, {
+					[`${directory}index.js`]: `export const version = '${version}'\n`,
+					[`${directory}package.json`]: JSON.stringify({ name: packageName, version }),
+				})
+				if (mode === 'shared') {
+					await writeFiles(root, { 'package.json': JSON.stringify({ name: 'example', version }) })
+				}
+
+				await commit(root, `Release: ${version}`)
+				await git(root, ['tag', qualified(version)])
+			}
+
+			const section = (version: string) => `## ${version}\n\n* Keep  ${version} verbatim.\n\n`
+			const history = section('1.2.0') + section('1.2.0-fork.1')
+			const rootHistory = section(qualified('1.2.0')) + section(qualified('1.2.0-fork.1'))
+			await writeFiles(root, {
+				[`${directory}changelog.md`]: changelogHeader + '\n' + history,
+				'changelog.md': changelogHeader + '\n' + rootHistory,
+			})
+			const agent = fixtureAgent()
+			const options = { agent, cache: false, cwd: root, github: false }
+			const plan = await generateChangelog(options)
+			const requested = agent.generate.mock.calls.flatMap(([request]) => request.releases)
+			expect(new Set(requested.map(({ version }) => version))).toEqual(
+				new Set(['1.2.0-fork.2', '1.2.0-fork.3']),
+			)
+			const rootFile = plan.files.find((file) => file.path === path.join(root, 'changelog.md'))!
+			expect(parseChangelog(rootFile.after).sections.map(({ version }) => version)).toEqual(
+				['1.2.0-fork.3', '1.2.0-fork.2', '1.2.0-fork.1', '1.2.0'].map((version) =>
+					qualified(version),
+				),
+			)
+			expect(rootFile.after).toContain(section(qualified('1.2.0')))
+			expect(rootFile.after).toContain(section(qualified('1.2.0-fork.1')))
+			const latest = plan.releases.find(
+				(release) => release.packageName === packageName && release.version === '1.2.0-fork.3',
+			)
+			expect(latest?.changes[0]?.description).toBe(`Improve ${packageName} in 1.2.0-fork.3.`)
+			await writeChangelog(plan)
+			agent.generate.mockClear()
+			const repeated = await generateChangelog(options)
+			expect(repeated.files).toEqual([])
+			expect(agent.generate).not.toHaveBeenCalled()
+		},
+	)
+
 	it.each(['python', 'rust', 'plain Git'])(
 		'initializes and updates a %s project without npm metadata',
 		async (language) => {

@@ -326,6 +326,27 @@ function pendingTag(
 	return template.replaceAll('{name}', () => pkg.name).replaceAll('{version}', () => version)
 }
 
+/**
+ * Order releases by Git ancestry, using SemVer only for tags on the same
+ * commit.
+ */
+export async function sortReleases<T extends Pick<Release, 'ref' | 'version'>>(
+	repository: Repository,
+	releases: T[],
+): Promise<T[]> {
+	const history = await git(repository.root, [
+		'rev-list',
+		'--topo-order',
+		'--reverse',
+		repository.head,
+	])
+	const positions = new Map(history.split('\n').map((ref, index) => [ref, index]))
+	return releases.toSorted((a, b) => {
+		const difference = (positions.get(a.ref) ?? -1) - (positions.get(b.ref) ?? -1)
+		return difference === 0 ? semver.compare(a.version, b.version) : difference
+	})
+}
+
 /** Resolve release intervals from reachable tags and locally bumped manifests. */
 export async function resolveReleases(
 	repository: Repository,
@@ -333,9 +354,7 @@ export async function resolveReleases(
 	config: Pick<Config, 'tagPatterns'>,
 	context?: ReleaseContext,
 ): Promise<Release[]> {
-	const releases = await taggedReleases(repository, pkg, config)
-
-	releases.sort((a, b) => semver.compare(a.version, b.version))
+	const releases = await sortReleases(repository, await taggedReleases(repository, pkg, config))
 	for (let index = 1; index < releases.length; index++) {
 		const current = releases[index]!
 		const previous = await precedingRelease(repository.root, releases.slice(0, index), current.ref)
@@ -345,7 +364,7 @@ export async function resolveReleases(
 
 	const latest = releases.at(-1)
 	const currentVersion = pkg.version ?? (pkg.directory === '.' ? context?.version : undefined)
-	const pending = await isPendingRelease(repository, pkg, latest, context)
+	const pending = await isPendingRelease(repository, pkg, releases, context)
 
 	if (pending && currentVersion !== undefined) {
 		releases.push({
@@ -630,7 +649,7 @@ async function precedingRelease(
 async function isPendingRelease(
 	repository: Repository,
 	pkg: PackageInfo,
-	latest: Release | undefined,
+	releases: Release[],
 	context?: ReleaseContext,
 ): Promise<boolean> {
 	const currentVersion = pkg.version ?? (pkg.directory === '.' ? context?.version : undefined)
@@ -641,7 +660,9 @@ async function isPendingRelease(
 	return (
 		currentVersion !== undefined &&
 		semver.valid(currentVersion) !== null &&
-		(latest === undefined || semver.gt(currentVersion, latest.version)) &&
-		(versionChanged || context !== undefined || committedBump)
+		releases.every((release) => release.version !== semver.valid(currentVersion)) &&
+		(versionChanged ||
+			context !== undefined ||
+			(committedBump && releases.every((release) => release.ref !== repository.head)))
 	)
 }
