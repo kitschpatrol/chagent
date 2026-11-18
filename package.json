@@ -42,7 +42,9 @@
 		"chagent": "dist/bin/cli.js"
 	},
 	"files": [
-		"dist"
+		"changelog.md",
+		"dist",
+		"docs"
 	],
 	"scripts": {
 		"build": "tsdown",

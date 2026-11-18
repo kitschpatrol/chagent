@@ -21,36 +21,11 @@
 
 ## Overview
 
-Run `chagent` in a Git repository to either create a changelog where none previously existed, or update an existing changelog to capture recent changes.
+Run `chagent` in a Git repository to draft a changelog from its tagged releases. If you already have a changelog, chagent fills in missing releases and adds changes since the last tag under `Unreleased`. Projects can use any language or build system.
 
-Projects can use any language or build system. Version tags supply release boundaries; `package.json` is optional. Codex or Claude inspects historical commits and files directly to decide what belongs in each release.
+The agent can revise its own `Unreleased` draft as work continues. Once you edit the draft, chagent keeps your wording and adds new entries alongside it. At release time, those notes move into the versioned section. See [this project's changelog](changelog.md) for an example.
 
-Between releases, it will add changes under the `Unreleased` heading. A draft that only chagent has written is revised as work continues, so a later fix folds into the entry it affects instead of adding another. A draft you wrote or edited keeps its text and is only added to. Historical release sections retain their original Markdown.
-
-Initialization reconstructs the complete reachable release history, including the initial release's capabilities and meaningful documentation, dependency, compatibility, build, test, and CI changes. Releases containing only maintenance still receive useful descriptions.
-
-Codex and Claude research missing releases together in one session, sharing their understanding of the project across versions and packages. Very large histories split into additional sessions only when their release context exceeds the input budget. Ordinary single-release updates use one request.
-
-The CLI and TypeScript library use your installed, authenticated Codex or Claude Code CLI. Codex defaults to `gpt-6.2-sol`. Claude Code uses the `opus` alias, which selects the latest Opus available through your provider. Both use `xhigh` reasoning effort by default. No separate API key or installed agent skill is required.
-
-Output uses the canonical [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) header and extends its six standard categories with `Documentation` and `Maintenance`. The standard headings describe user-facing concerns, including public APIs and runtime compatibility; the extensions also capture documentation and internal development work.
-
-| Heading         | Covers                                                                                                                                                                                                       |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Added`         | New user-facing features and public APIs.                                                                                                                                                                    |
-| `Changed`       | Changes to existing user-facing functionality, public APIs, or runtime support.                                                                                                                              |
-| `Deprecated`    | Features and public APIs scheduled for removal.                                                                                                                                                              |
-| `Removed`       | Removed features and public APIs.                                                                                                                                                                            |
-| `Fixed`         | Bugs affecting users or library consumers.                                                                                                                                                                   |
-| `Security`      | Vulnerability fixes affecting users or library consumers.                                                                                                                                                    |
-| `Documentation` | All documentation changes, including guides, examples, API documentation, and help text.                                                                                                                     |
-| `Maintenance`   | Other changes without a user-facing feature change, bug fix, vulnerability fix, or documentation change, including routine dependency updates, internal refactoring, builds, tests, CI, and release tooling. |
-
-Categories follow the impact of a change. A dependency update that fixes a user-facing bug belongs under `Fixed`, while a routine dependency refresh or a fix to development tooling belongs under `Maintenance`. Documentation-only corrections belong under `Documentation`.
-
-You can invoke it directly, or easily integrate it with a [bumpp](https://github.com/antfu-collective/bumpp)-powered release workflow.
-
-Future versions might offer more in the way of CI integration.
+In a perfect world, every changelog entry would be written with loving human care. However, as projects accumulate and life's finitude comes into focus, delegating a first draft to an LLM might be better than having no changelog at all in some contexts.
 
 ## Getting started
 
@@ -62,9 +37,7 @@ Future versions might offer more in the way of CI integration.
 
 <!-- /dependencies -->
 
-You also need Git and one supported agent CLI on your path. Log in to that CLI before running chagent. Optional GitHub enrichment uses an authenticated `gh` installation and falls back to local Git when unavailable.
-
-The adapters were exercised with Codex CLI 0.166.0 and Claude Code 2.1.311. Older versions must support the structured-output and isolation flags used by the adapters.
+Use a full Git checkout with its release tags. Install and sign in to Codex CLI (the default) or Claude Code. Chagent uses that CLI and account to send repository context to the selected agent service. An authenticated `gh` CLI can also supply pull requests and release dates.
 
 <!-- install -->
 
@@ -106,18 +79,6 @@ npm install @kitschpatrol/chagent
 
 ### CLI usage
 
-Use `--model` and `--effort` to override the selected agent's defaults.
-
-Explicit CLI flags override repository configuration, which overrides built-in defaults. The defaults shown in `--help` apply when no repository override is configured; the model default depends on the selected agent.
-
-Interactive review edits temporary candidate files. After the editor exits, the updated diff is displayed. Accepting writes exactly the saved content. Cancelling leaves repository files unchanged. Editor selection follows `git var GIT_EDITOR`, or `--editor`; GUI editor commands must wait, for example `code --wait`.
-
-The default command writes changelog files without staging or committing them.
-
-Add `--verbose` to log resolved options, Git and agent commands, cache decisions, and session timing to stderr. On a terminal, it replaces the progress timer with plain lines.
-
-Use `chagent --rebuild --interactive` to reconstruct an existing changelog from history and review the replacement. This explicitly replaces historical prose, including manual edits; ordinary runs preserve it. Use `--rebuild --dry-run` to preview the reconstruction without writing files. In a monorepo, rebuilding covers both package changelogs and the root summary.
-
 <!-- cli-help -->
 
 #### Commands
@@ -157,153 +118,64 @@ chagent
 
 #### CLI Examples
 
+Run chagent from the repository you want to document.
+
 ```sh
-# Automatically initialize or update the current repository.
-chagent
-
-# Review the diff, optionally edit, then accept or cancel.
-chagent --interactive
-
-# Reconstruct an existing changelog and review its replacement.
-chagent --rebuild --interactive
-
-# Select Claude Opus 5.5 with xhigh effort.
-chagent --agent claude
-
-# Preview changes without applying them.
-chagent --dry-run --no-github
+chagent --dry-run     # Print the proposed diff
+chagent --interactive # Review, edit, and accept or cancel
+chagent               # Write the changelog
+chagent --agent claude --interactive
 ```
 
-### Library
+Interactive review uses your Git editor. For VS Code, use `--editor "code --wait"`. A plain run leaves the changes in your working tree for you to commit.
 
-#### API
+Use **`--rebuild`** only when you want to replace existing release text, including hand-written entries. Preview the replacement with `chagent --rebuild --dry-run`.
 
-`generateChangelog` returns proposed edits, release summaries, diagnostics, and incremental checkpoints. `writeChangelog` verifies the original file contents and Git HEAD before applying edits. It rejects symlink destinations, rolls back a failed series of writes, and leaves the index unchanged.
+### Library API
 
-`previewChangelog(plan)` returns a unified diff. `reviewChangelog(plan, { editor })` provides terminal review and returns an edited plan, or `undefined` when cancelled. `amendRelease(plan)` is the explicit post-bump release integration described below. It reads repository configuration as generation does; pass it any `configFile`, `packages`, `exclude`, or `tagPatterns` options you gave `generateChangelog` directly. `setLogger(logger)` enables library logging; library calls are silent by default. Pass `onProgress` to `generateChangelog` to receive short status messages between agent sessions.
-
-Custom providers implement the exported `AgentAdapter` type and can be passed as `agent`. Their `generate(request)` method receives a `GenerationRequest` with one or more `releases` to research together, the local `repositoryRoot`, and run `settings`. Each release identifies its package, scope, mode, Git refs, and a bounded starting context, including a range citation for findings from direct research of the local Git checkout. In `revise` mode, `existingEntries` is an earlier generated draft covering the release up to `repository.from`: the changes returned replace it, and entries carried over cite the `draft` evidence ID. The method resolves to `{ releases: [{ id, changes }] }`, with every requested release ID exactly once, one of the eight supported categories, and at least one citation for each change: an ID from that release's own `evidence`, or the ID of a commit within its range. Give an adapter a stable `cacheKey` to enable reusable draft caching, and change that key when its behavior changes. All adapter results receive the same output validation.
-
-#### API Examples
+`generateChangelog` prepares the edits. Call `writeChangelog` to apply them, or `previewChangelog` to get a unified diff.
 
 ```ts
 import { generateChangelog, writeChangelog } from '@kitschpatrol/chagent'
 
 const plan = await generateChangelog({ cwd: '/path/to/repository' })
-
-// Inspect plan.files or edit their `after` contents before applying them.
 await writeChangelog(plan)
 ```
 
-### Bumpp integration
-
-Chagent works nicely with the [bumpp](https://github.com/antfu-collective/bumpp) versioning and release tool.
-
-#### Bumpp CLI approach
-
-Execute chagent as part of the bump process:
-
-```sh
-bumpp --all --execute "chagent -i"
-```
-
-This runs the following sequence:
-
-1. Bumpp updates the package version.
-2. Chagent moves all existing `Unreleased` notes into the new release section and adds missing changes. Notes you wrote or edited keep their text; a draft that only chagent has written may be revised to fold in what followed. Older release sections remain unchanged.
-3. The `-i` flag displays the diff and lets you edit, accept, or cancel. Saved edits are included when you accept.
-4. Bumpp commits the version and changelog changes together, tags the release, and pushes.
-
-Remove `-i` to skip review. Add `--no-push` if you want to push separately.
-
-`--all` is needed for this command because bumpp otherwise commits only its version-update files. It includes every pending change, including unrelated and untracked files, so start from a clean working tree. It controls which files are committed, not which files bumpp updates versions in.
-
-#### Bumpp configuration file approach
-
-Alternatively, use the library callback in `bump.config.ts` to include only the generated changelogs alongside the version-update files, without `--all`:
-
-```ts
-import { createBumppHook } from '@kitschpatrol/chagent/bumpp'
-import { defineConfig } from 'bumpp'
-
-export default defineConfig({
-  commit: 'Release {version}.',
-  execute: createBumppHook(),
-})
-```
-
-For review during releases, use `createBumppHook({ interactive: true })`. Other options include `agent`, `model`, `effort`, `github`, `cache`, and `editor`.
-
-The callback shows progress and diagnostics on stderr. Pass `onProgress` to handle status messages yourself.
-
-Bumpp updates versions before invoking the callback. The callback generates and reviews changelogs, stages only those files, and adds them to bumpp's explicit commit file list. Bumpp then commits and tags the complete release. Its existing push and publishing settings remain under your control.
-
-Avoid putting changelogs in bumpp's version-replacement `files` option: it can replace version references in historical entries.
-
-With either approach, a generation error or cancelled review stops bumpp before its commit and tag. Bumpp's already updated version files remain available for correction or retry. The callback requires bumpp 12.3.0 or newer. It works with recursive releases, and with independently versioned packages released from their own directories.
-
-For an existing post-bump workflow such as `npm version`, `chagent --amend` explicitly amends an unpublished version-only release commit and updates local tags that match your tag patterns. It checks current remote refs, preserves unrelated staged work and tag annotations, and refuses published releases, ambiguous commits, detached HEAD, and signed tags. Signed tags need manual re-signing; the pre-commit callback avoids that problem. Chagent itself never pushes or publishes.
-
-### Monorepos
-
-Workspace declarations in `pnpm-workspace.yaml` or `package.json` determine the packages to process. Each current workspace package gets its own changelog. The root changelog summarizes the repository: each of its sections holds a few highlights written by the agent, followed by a `Packages` list linking to the package release sections it covers. Chagent maintains that list, so a draft's links to unreleased package changes are replaced by links to the releases once they exist. Package entries are not copied into the root.
-
-Use the `rootChangelog` option or `--root-changelog` flag to choose what the root changelog records. The default, `summary`, works as described above. `package` treats the root as a package of its own, for repositories whose main package lives at the root: its changelog describes the root's files and the workspace packages it depends on in full detail, without changes from other packages or links to their releases. `none` writes only the package changelogs. After changing the mode of an existing root changelog, run with `--rebuild` to reconstruct its history in the new form.
-
-Use `skipPackage` directory globs, or repeat `--skip-package`, to leave workspace packages such as documentation sites or examples without changelogs. A skipped package is left out of the root changelog, and its changes are not counted among the root's own, but packages that depend on it still include its relevant changes. To count a directory's changes as the root's instead, `exclude` it from workspace discovery. A pattern that matches no workspace package is an error.
-
-For other monorepo layouts, configure `packages` directory globs. These directories do not need npm manifests; their Git tags identify releases, using the directory basename as the package name.
-
-Shared-version repositories use repository versions at the root, where each release summarizes every package released with it. Independently versioned repositories use package-qualified headings such as `@example/package@1.2.0`, each summarizing one package release. Repository infrastructure changes appear in the root's `Unreleased` section. Explicit workspace dependencies contribute relevant source context to dependent packages. Dependency and tooling maintenance belongs under `Maintenance`. `build`, `coverage`, and `dist` directories at the top of a package usually hold generated output, so they are left out of the starting evidence and the agent decides whether their changes belong in the changelog. A package named `packages/build` is still treated as source.
-
-GitHub links to package changelogs on the default branch remain usable when a root entry is extracted for GitHub release notes.
+The [library reference](docs/library.md) covers interactive review, progress reporting, and custom agent adapters.
 
 ### Configuration
 
-Configuration is optional. A `chagent.config.ts` file can override defaults:
+To set defaults for a repository, put them in `chagent.config.ts` at the repository root. Explicit CLI flags override those defaults.
 
 ```ts
-import { defineConfig } from '@kitschpatrol/chagent'
-
-export default defineConfig({
-  agent: 'codex',
-  cache: true,
-  effort: 'xhigh',
-  github: true,
-  maxInputChars: 80_000,
-  model: 'gpt-6.2-sol',
-  rootChangelog: 'summary',
-  timeout: 20,
-})
+export default {
+  agent: 'claude',
+  github: false,
+}
 ```
 
-Importing `defineConfig` requires chagent in the repository's own dependencies. With `npx`, Homebrew, or a global installation, export a plain object instead.
+In a monorepo, chagent writes per-package changelogs and a root summary with links to the package releases. See [configuration and workspaces](docs/config.md) for other layouts, root changelog modes, and tag patterns.
 
-Also supported: `chagent.config.mjs`, `chagent.config.js`, `chagent.config.json`, or a `chagent` key in `package.json`. CLI flags override configured values. `--config` selects a specific file.
+### Bumpp integration
 
-Use `packages` and `exclude` directory globs to customize workspace discovery, and `skipPackage` to leave discovered packages without changelogs. Use `tagPatterns` to select unusual release tag conventions. Templates support `{name}` and `{version}`; defaults recognize `v1.2.3`, `1.2.3`, `@scope/package@1.2.3`, and `@scope/package/v1.2.3`. Short versions such as `v1` and `v1.2` name the `1.0.0` and `1.2.0` releases when they precede every more precise tag in their series, so floating tags that track the latest release are ignored. Default patterns read one-part versions only after a `v`; configure `tagPatterns` to read bare numbers such as `1`.
+Use `createBumppHook()` in your bumpp configuration to include the changelogs in the release commit. The [release guide](docs/releases.md) includes a working configuration, a shell alternative, and the post-bump workflow for `npm version`.
 
 ## Background
 
-### Implementation notes
+Git tags tell chagent where each release begins and ends. The selected agent reads the commits and files in that range and proposes entries. Chagent checks their source references and writes the Markdown. See [how generation works](docs/generation.md) for release detection, categories, caching, and formatting.
 
-Release order follows Git ancestry, with SemVer breaking ties between tags on the same commit. Fork releases such as `1.2.0-fork.2` can therefore follow upstream `1.2.0`. Updates fill missing reachable releases even when their versions compare lower than an existing heading, while preserving the text of recorded sections.
+## The future
 
-Chagent reads reachable version tags and commit history regardless of the project's language. Optional npm metadata supplies workspace discovery, local version-bump detection before tagging, and the conditional Node.js compatibility note. Repository tags remain authoritative even when a root `package.json` has an unrelated tooling version. Other projects use tagged releases, or an explicit `release` context through the library API. Without reliable released-version boundaries, new changes belong to `Unreleased`; version numbers are not invented. An existing release heading with no matching Git boundary requires its tags or a corrected tag pattern. Release headings can be level one or two, with optional links, dates, and a `v` prefix, including the Conventional Changelog format. Headings can name short versions the way tags do, so `## 1.2` and `## v1` record the `1.2.0` and `1.0.0` releases. Level three headings count as releases when they name a version, as standard-version writes patch releases. Chagent stops rather than risk duplicating history when a level one or two heading names a version in another form, or when an unclosed code fence would hide later headings. Broken `package.json` files in history are tolerated. Shallow clones must be completed before generation.
-
-GitHub enrichment uses release dates and commit-associated PR information. PR lookups batch unique commits across all requested releases and packages; each release receives only its associated PRs. **GitHub release-note bodies are never generation inputs.** Changelog files, lockfiles, and `node_modules` are never source evidence. Existing changelog prose is supplied only to preserve edits, avoid duplicate entries, and show the writing style to match: each request carries the changelog's newest release section as a style reference, so new entries follow its voice, punctuation, and reference conventions.
-
-The agent chooses which historical source files, public interfaces, documentation, and build configuration to inspect. It reads Git snapshots at the supplied release refs instead of treating current or uncommitted files as historical evidence. `maxInputChars` bounds the starting context supplied to agents; it does not restrict which repository files they can investigate. Requests prioritize release boundaries and existing human entries, then fit optional starting evidence into the remaining budget. An individual release's existing entries are never truncated. `timeout` sets the minutes each agent session may run. Dependency entries reflect declared version ranges; lockfile-only resolution changes and pure npm version-bump bookkeeping are excluded.
-
-Agents return structured changes with evidence references. Citations are checked against Git: a change can cite supplied evidence or any commit within its release's range, abbreviated commit IDs are completed, and a change needs only one source that holds up. Stray whitespace and list markers in descriptions are normalized. A response that still fails validation gets one correction request; a second failure stops the run before anything is written or cached. Application code owns the header, release boundaries, Markdown insertion, and Git writes. Agents run in the repository: Codex uses a read-only sandbox with approval requests disabled; Claude exposes read/search and Bash tools in [`dontAsk` mode](https://code.claude.com/docs/en/permissions), which allows read-only commands and denies actions requiring permission. Customizations are disabled for these invocations. Only chagent writes the reviewed changelog. Repository content is sent to the selected agent service using your existing account.
-
-After writing, chagent passes each changed changelog to `fixFile` from the repository's own `@kitschpatrol/shared-config`, or from `@kitschpatrol/prettier-config` when that is all that imports. This formats the whole changelog, including older release sections, and no other files. `--dry-run` and `--interactive` diffs show the text before formatting. A formatting failure leaves the changelog as written and reports a diagnostic. Repositories without either package keep the changelog as written.
-
-Drafts and checkpoints are stored under the checkout's Git directory in `chagent/`. They are disposable and are not committed. A checkpoint records the commit a changelog covers and whether its `Unreleased` draft is entirely generated. While the changelog still reads as chagent left it, the next run researches only newer commits, and a generated draft is revised rather than appended to. Editing the changelog, in review or afterward, ends that: the draft is yours, and chagent only adds to it. Shared session results are validated together and cached separately for each release. Completed sessions can be reused after interruptions; an interrupted session must run again. `--no-cache` disables reuse and persistence. Dry runs can populate the draft cache but do not apply changelog edits.
+Possible additions include CI integration and dropping the agent CLI dependency.
 
 ## Maintainers
 
 [kitschpatrol](https://github.com/kitschpatrol)
+
+## Acknowledgments
+
+Chagent follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) for its release format.
 
 <!-- contributing -->
 
