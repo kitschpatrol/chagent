@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Entries are drafted with LLM assistance via [Chagent](https://github.com/kitschpatrol/chagent).
 
+## [0.8.0] - 2026-11-18
+
+### Added
+
+- Add short CLI aliases `-a` for `--agent`, `-m` for `--model`, and `-e` for `--effort`.
+
+### Changed
+
+- Credit Chagent for LLM-assisted drafting in new changelog headers. Add the same credit to existing headers that link to Semantic Versioning, even when there are no new release entries.
+
+### Documentation
+
+- Simplify the README’s setup and CLI examples, document the new short flags, and add dedicated guides for configuration and workspaces, changelog generation, the TypeScript API and custom adapters, and release workflows with bumpp and `npm version`.
+
+### Maintenance
+
+- Include `docs/` and `changelog.md` in the published npm package.
+- Test that short CLI flags override configured values and share cached results with their long forms.
+- Test that adding attribution preserves existing changelog entries and CRLF line endings, and that repeated runs preserve line-wrapped attribution.
+
 ## [0.7.0] - 2026-11-18
 
 ### Changed
@@ -148,3 +168,4 @@ Entries are drafted with LLM assistance via [Chagent](https://github.com/kitschp
 [0.5.0]: https://github.com/kitschpatrol/chagent/compare/v0.4.0...v0.5.0
 [0.6.0]: https://github.com/kitschpatrol/chagent/compare/v0.5.0...v0.6.0
 [0.7.0]: https://github.com/kitschpatrol/chagent/compare/v0.6.0...v0.7.0
+[0.8.0]: https://github.com/kitschpatrol/chagent/compare/v0.7.0...v0.8.0
