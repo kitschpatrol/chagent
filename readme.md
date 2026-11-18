@@ -96,9 +96,9 @@ chagent
 | Option                  | Description                                                                             | Type                                          | Default                            |
 | ----------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------- | ---------------------------------- |
 | `--cwd`                 | Repository directory                                                                    | `string`                                      | current directory                  |
-| `--agent`               | Installed agent CLI                                                                     | `"codex"` `"claude"`                          | `codex`                            |
-| `--model`               | Agent model                                                                             | `string`                                      | gpt-6.2-sol (Codex); opus (Claude) |
-| `--effort`              | Reasoning effort                                                                        | `"low"` `"medium"` `"high"` `"xhigh"` `"max"` | `xhigh`                            |
+| `--agent`<br>`-a`       | Installed agent CLI                                                                     | `"codex"` `"claude"`                          | `codex`                            |
+| `--model`<br>`-m`       | Agent model                                                                             | `string`                                      | gpt-6.2-sol (Codex); opus (Claude) |
+| `--effort`<br>`-e`      | Reasoning effort                                                                        | `"low"` `"medium"` `"high"` `"xhigh"` `"max"` | `xhigh`                            |
 | `--interactive`<br>`-i` | Review a diff and optionally edit before writing                                        | `boolean`                                     | `false`                            |
 | `--editor`              | Editor command for interactive review; configure GUI editors to wait                    | `string`                                      | git var GIT_EDITOR                 |
 | `--dry-run`             | Print a diff without applying changes                                                   | `boolean`                                     | `false`                            |

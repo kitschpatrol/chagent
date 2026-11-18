@@ -115,17 +115,20 @@ try {
 						type: 'string',
 					})
 					.option('agent', {
+						alias: 'a',
 						choices: agentNames,
 						defaultDescription: defaults.agent,
 						description: 'Installed agent CLI',
 						type: 'string',
 					})
 					.option('model', {
+						alias: 'm',
 						defaultDescription: `${defaultModels.codex} (Codex); ${defaultModels.claude} (Claude)`,
 						description: 'Agent model',
 						type: 'string',
 					})
 					.option('effort', {
+						alias: 'e',
 						choices: efforts,
 						defaultDescription: defaults.effort,
 						description: 'Reasoning effort',

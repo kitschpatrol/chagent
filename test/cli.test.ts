@@ -158,17 +158,17 @@ describe('cli', () => {
 		expect(configured[0]?.args).toEqual(
 			expect.arrayContaining(['--model', 'configured-model', '--effort', 'low']),
 		)
-		const args = [
-			cliPath,
-			'--dry-run',
-			'--agent=codex',
-			'--effort=xhigh',
-			'--model=override-model',
-			'--cache',
-			'--github',
-		]
-		await runCommand(process.execPath, args, { cwd: root })
-		await runCommand(process.execPath, args, { cwd: root })
+		const args = [cliPath, '--dry-run', '--cache', '--github']
+		await runCommand(
+			process.execPath,
+			[...args, '-a', 'codex', '-m', 'override-model', '-e', 'xhigh'],
+			{ cwd: root },
+		)
+		await runCommand(
+			process.execPath,
+			[...args, '--agent=codex', '--model=override-model', '--effort=xhigh'],
+			{ cwd: root },
+		)
 		const overridden = await cliCalls(root)
 		const codex = overridden.filter((call) => call.name === 'codex')
 		expect(codex).toHaveLength(1)
