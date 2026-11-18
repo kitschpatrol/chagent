@@ -207,10 +207,10 @@ async function withPullRequests(
 function progressMessage(pending: ReleaseRequest[], sessions: number): string {
 	const [only] = pending
 	if (only !== undefined && pending.length === 1) {
-		return `Researching ${only.packageName} ${only.version}.`
+		return `Chagent is drafting a changelog for ${only.packageName} ${only.version}.`
 	}
 
-	return `Researching ${pending.length} release ranges in ${sessions} shared agent session${sessions === 1 ? '' : 's'}.`
+	return `Chagent is drafting changelog entries for ${pending.length} release ranges in ${sessions} shared agent session${sessions === 1 ? '' : 's'}.`
 }
 
 /**

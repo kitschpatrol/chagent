@@ -144,7 +144,9 @@ describe('release integration', () => {
 			stderr.mockRestore()
 		}
 
-		expect(output).toContain('Researching 2 release ranges in 1 shared agent session.')
+		expect(output).toContain(
+			'Chagent is drafting changelog entries for 2 release ranges in 1 shared agent session.',
+		)
 		expect(output).toContain('The formatter failed.')
 	})
 

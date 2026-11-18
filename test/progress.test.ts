@@ -59,9 +59,9 @@ describe('createProgressLine', () => {
 		const progress = createProgressLine(stream)
 		progress.start('Reading repository history.')
 		expect(lastLine()).toContain('Reading repository history [0s]')
-		progress.update('Researching chagent 1.0.0.')
+		progress.update('Chagent is drafting a changelog for chagent 1.0.0.')
 		vi.advanceTimersByTime(FRAME_INTERVAL_MS)
-		expect(lastLine()).toContain('Researching chagent 1.0.0 [0s]')
+		expect(lastLine()).toContain('Chagent is drafting a changelog for chagent 1.0.0 [0s]')
 		progress.stop()
 	})
 

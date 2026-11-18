@@ -201,7 +201,7 @@ describe('cli', () => {
 		})
 		expect(first.stderr).not.toContain('Running:')
 		expect(first.stderr).not.toContain('Resolved options')
-		expect(first.stderr).toBe('Researching example Unreleased.\n')
+		expect(first.stderr).toBe('Chagent is drafting a changelog for example Unreleased.\n')
 		const verbose = await runCommand(process.execPath, [cliPath, '--dry-run', '--verbose'], {
 			cwd: root,
 		})

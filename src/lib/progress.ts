@@ -4,7 +4,7 @@ import { styleText } from 'node:util'
 
 const FRAMES = unicode ? ['◒', '◐', '◓', '◑'] : ['•', 'o', 'O', '0']
 const FRAME_INTERVAL_MS = 80
-const FRAME_PADDING = '  '
+const FRAME_PADDING = ' '
 const CLEAR_TO_LINE_END = '\u{1B}[K'
 const HIDE_CURSOR = '\u{1B}[?25l'
 const SHOW_CURSOR = '\u{1B}[?25h'

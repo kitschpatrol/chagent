@@ -825,7 +825,7 @@ describe('generation and writing', () => {
 		const onProgress = vi.fn<(message: string) => void>()
 		await generateChangelog({ agent, cwd: root, github: false, onProgress })
 		expect(onProgress.mock.calls.map(([message]) => message)).toEqual([
-			'Researching 2 release ranges in 1 shared agent session.',
+			'Chagent is drafting changelog entries for 2 release ranges in 1 shared agent session.',
 			'Requesting a correction of invalid agent output.',
 		])
 	})
