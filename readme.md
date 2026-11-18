@@ -31,7 +31,7 @@ Initialization reconstructs the complete reachable release history, including th
 
 Codex and Claude research missing releases together in one session, sharing their understanding of the project across versions and packages. Very large histories split into additional sessions only when their release context exceeds the input budget. Ordinary single-release updates use one request.
 
-The CLI and TypeScript library use your installed, authenticated Codex or Claude Code CLI. Codex defaults to `gpt-6.1-sol`; Claude defaults to [Opus 5.5](https://platform.claude.com/docs/en/models/opus-5-5/overview) (`claude-opus-5-5`). Both use `xhigh` reasoning effort by default. No separate API key or installed agent skill is required.
+The CLI and TypeScript library use your installed, authenticated Codex or Claude Code CLI. Codex defaults to `gpt-6.2-sol`. Claude Code uses the `opus` alias, which selects the latest Opus available through your provider. Both use `xhigh` reasoning effort by default. No separate API key or installed agent skill is required.
 
 Output uses the canonical [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) header and extends its six standard categories with `Documentation` and `Maintenance`. The standard headings describe user-facing concerns, including public APIs and runtime compatibility; the extensions also capture documentation and internal development work.
 
@@ -132,26 +132,26 @@ Usage:
 chagent
 ```
 
-| Option                  | Description                                                                             | Type                                          | Default                                       |
-| ----------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------- | --------------------------------------------- |
-| `--cwd`                 | Repository directory                                                                    | `string`                                      | current directory                             |
-| `--agent`               | Installed agent CLI                                                                     | `"codex"` `"claude"`                          | `codex`                                       |
-| `--model`               | Agent model                                                                             | `string`                                      | gpt-6.1-sol (Codex); claude-opus-5-5 (Claude) |
-| `--effort`              | Reasoning effort                                                                        | `"low"` `"medium"` `"high"` `"xhigh"` `"max"` | `xhigh`                                       |
-| `--interactive`<br>`-i` | Review a diff and optionally edit before writing                                        | `boolean`                                     | `false`                                       |
-| `--editor`              | Editor command for interactive review; configure GUI editors to wait                    | `string`                                      | git var GIT_EDITOR                            |
-| `--dry-run`             | Print a diff without applying changes                                                   | `boolean`                                     | `false`                                       |
-| `--rebuild`             | Reconstruct all history, replacing existing release text                                | `boolean`                                     | `false`                                       |
-| `--amend`               | Amend a verified unpublished release commit and matching local tags                     | `boolean`                                     | `false`                                       |
-| `--root-changelog`      | Monorepo root changelog: a summary of package releases, the root package alone, or none | `"summary"` `"package"` `"none"`              | `summary`                                     |
-| `--skip-package`        | Workspace package directory glob to leave without a changelog; repeatable               | `array`                                       | `none`                                        |
-| `--github`              | Enrich Git evidence using gh when available; disable with --no-github                   | `boolean`                                     | `true`                                        |
-| `--cache`               | Cache drafts and incremental state; disable with --no-cache                             | `boolean`                                     | `true`                                        |
-| `--config`              | Configuration file path                                                                 | `string`                                      | auto-detected from repository root            |
-| `--timeout`             | Agent timeout in minutes                                                                | `number`                                      | `20`                                          |
-| `--verbose`             | Log commands, cache decisions, and session details to stderr                            | `boolean`                                     | `false`                                       |
-| `--help`<br>`-h`        | Show help                                                                               | `boolean`                                     |                                               |
-| `--version`<br>`-v`     | Show version number                                                                     | `boolean`                                     |                                               |
+| Option                  | Description                                                                             | Type                                          | Default                            |
+| ----------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------- | ---------------------------------- |
+| `--cwd`                 | Repository directory                                                                    | `string`                                      | current directory                  |
+| `--agent`               | Installed agent CLI                                                                     | `"codex"` `"claude"`                          | `codex`                            |
+| `--model`               | Agent model                                                                             | `string`                                      | gpt-6.2-sol (Codex); opus (Claude) |
+| `--effort`              | Reasoning effort                                                                        | `"low"` `"medium"` `"high"` `"xhigh"` `"max"` | `xhigh`                            |
+| `--interactive`<br>`-i` | Review a diff and optionally edit before writing                                        | `boolean`                                     | `false`                            |
+| `--editor`              | Editor command for interactive review; configure GUI editors to wait                    | `string`                                      | git var GIT_EDITOR                 |
+| `--dry-run`             | Print a diff without applying changes                                                   | `boolean`                                     | `false`                            |
+| `--rebuild`             | Reconstruct all history, replacing existing release text                                | `boolean`                                     | `false`                            |
+| `--amend`               | Amend a verified unpublished release commit and matching local tags                     | `boolean`                                     | `false`                            |
+| `--root-changelog`      | Monorepo root changelog: a summary of package releases, the root package alone, or none | `"summary"` `"package"` `"none"`              | `summary`                          |
+| `--skip-package`        | Workspace package directory glob to leave without a changelog; repeatable               | `array`                                       | `none`                             |
+| `--github`              | Enrich Git evidence using gh when available; disable with --no-github                   | `boolean`                                     | `true`                             |
+| `--cache`               | Cache drafts and incremental state; disable with --no-cache                             | `boolean`                                     | `true`                             |
+| `--config`              | Configuration file path                                                                 | `string`                                      | auto-detected from repository root |
+| `--timeout`             | Agent timeout in minutes                                                                | `number`                                      | `20`                               |
+| `--verbose`             | Log commands, cache decisions, and session details to stderr                            | `boolean`                                     | `false`                            |
+| `--help`<br>`-h`        | Show help                                                                               | `boolean`                                     |                                    |
+| `--version`<br>`-v`     | Show version number                                                                     | `boolean`                                     |                                    |
 
 <!-- /cli-help -->
 
@@ -271,7 +271,7 @@ export default defineConfig({
   effort: 'xhigh',
   github: true,
   maxInputChars: 80_000,
-  model: 'gpt-6.1-sol',
+  model: 'gpt-6.2-sol',
   rootChangelog: 'summary',
   timeout: 20,
 })

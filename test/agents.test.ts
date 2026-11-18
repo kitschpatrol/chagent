@@ -118,7 +118,8 @@ if (${JSON.stringify(name)} === 'codex') {
 				name === 'codex'
 					? [
 							'read-only',
-							'gpt-6.1-sol',
+							'--model',
+							'gpt-6.2-sol',
 							'model_reasoning_effort="xhigh"',
 							'features.shell_tool=true',
 							'approval_policy="never"',
@@ -130,7 +131,7 @@ if (${JSON.stringify(name)} === 'codex') {
 							'--permission-mode',
 							'dontAsk',
 							'--model',
-							'claude-opus-5-5',
+							'opus',
 							'--effort',
 							'xhigh',
 						]

@@ -8,7 +8,7 @@ export const defaults = {
 	timeout: 20,
 } as const
 
-export const defaultModels = { claude: 'claude-opus-5-5', codex: 'gpt-6.1-sol' }
+export const defaultModels = { claude: 'opus', codex: 'gpt-6.2-sol' }
 
 /** Node.js timers fire immediately when given a longer delay. */
 export const maxTimeoutMinutes = 2_147_483_647 / 60_000
