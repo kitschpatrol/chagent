@@ -231,6 +231,21 @@ describe('generation and writing', () => {
 		expect(agent.generate).toHaveBeenCalledTimes(calls)
 	})
 
+	it('keeps a line-wrapped attribution on the next generation', async () => {
+		const root = await createRepository()
+		await git(root, ['tag', 'v1.0.0'])
+		const options = { agent: fixtureAgent(), cwd: root, github: false }
+		await writeChangelog(await generateChangelog(options))
+		const file = path.join(root, 'changelog.md')
+		const original = await readFile(file, 'utf8')
+		const wrapped = original.replace('assistance via [Chagent]', 'assistance via\n[Chagent]')
+		expect(wrapped).not.toBe(original)
+		await writeFile(file, wrapped)
+
+		const repeated = await generateChangelog(options)
+		expect(repeated.files).toEqual([])
+	})
+
 	it('preserves human history and draft notes when a release is bumped', async () => {
 		const history = '## [1.0.0] - 2026-01-01\n\n### Fixed\n\n* Keep  this handcrafted entry.\n\n'
 		const root = await createRepository({

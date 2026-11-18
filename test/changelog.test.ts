@@ -13,6 +13,8 @@ import {
 
 const THEME_DESCRIPTION = /Support custom themes/gv
 
+const attribution =
+	'Entries are drafted with LLM assistance via [Chagent](https://github.com/kitschpatrol/chagent).'
 const change: Change = {
 	breaking: false,
 	category: 'Added',
@@ -227,6 +229,7 @@ describe('changelog rendering', () => {
 		expect(result).toBe(
 			`${changelogHeader}\n## 1.0.0 - 2026-01-01\n\n### Added\n\n- Support custom themes.\n`,
 		)
+		expect(parseChangelog(result).header.endsWith(`\n\n${attribution}\n\n`)).toBe(true)
 	})
 
 	it.each([
@@ -328,11 +331,31 @@ describe('changelog rendering', () => {
 		expect(result.match(THEME_DESCRIPTION)).toHaveLength(1)
 	})
 
-	it('adds the evidence-backed Node note only once', () => {
+	it('adds the evidence-backed Node note once, before the attribution', () => {
 		const first = updateMarkdown(changelogHeader, [], true)
-		expect(first).toContain(nodeExceptionNote)
+		expect(first).toContain(`\n\n${nodeExceptionNote}\n\n${attribution}\n`)
 		expect(updateMarkdown(first, [], true)).toBe(first)
 	})
+
+	it.each([
+		['without a Node note', '', false, ''],
+		['with a legacy Node note', `\n${nodeExceptionNote}\n`, false, `\n${nodeExceptionNote}\n`],
+		['with a detected Node exception', '', true, `\n${nodeExceptionNote}\n`],
+	])(
+		'adds attribution to a legacy header %s and preserves the rest',
+		(_label, existingNote, nodeException, expectedNote) => {
+			const legacyHeader = changelogHeader.replace(`\n${attribution}\n`, '')
+			const sections = '\n## Unreleased\n\n* Keep  my draft.\n\n\n## 1.0.0\n\n* First.\n'
+			const original = (legacyHeader + existingNote + sections).replaceAll('\n', '\r\n')
+			const expected = (legacyHeader + expectedNote + `\n${attribution}\n` + sections).replaceAll(
+				'\n',
+				'\r\n',
+			)
+			const updated = updateMarkdown(original, [], nodeException)
+			expect(updated).toBe(expected)
+			expect(updateMarkdown(updated, [], nodeException)).toBe(updated)
+		},
+	)
 
 	it('drops the Unreleased comparison link when the draft is promoted', () => {
 		const original =

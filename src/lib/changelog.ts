@@ -22,12 +22,13 @@ const STYLE_REFERENCE_LENGTH = 2000
 const CATEGORY_HEADING = /^### /mv
 const PACKAGES_HEADING = /^### Packages\s*$/mv
 const LINK_TARGET = /\]\(([^\)]*)\)/gv
-const SEMVER_LINE = /^.*\[Semantic Versioning\].*(?:\r?\n|$)/mv
+const SEMVER_LINE = /^.*\[Semantic Versioning\].*$/mv
 const UNRELEASED_REFERENCE = /^\[unreleased\]:[^\r\n]*(?:\r?\n)?/imv
 const V_PREFIX = /^v\d/v
 
-export const changelogHeader =
-	'# Changelog\n\nAll notable changes to this project will be documented in this file.\n\nThe format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),\nand this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).\n'
+const attribution =
+	'Entries are drafted with LLM assistance via [Chagent](https://github.com/kitschpatrol/chagent).'
+export const changelogHeader = `# Changelog\n\nAll notable changes to this project will be documented in this file.\n\nThe format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),\nand this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).\n\n${attribution}\n`
 /** The body of a release section without any changes to record. */
 export const noNotableChanges = 'No notable changes.'
 export const nodeExceptionNote =
@@ -317,7 +318,7 @@ function releaseLink(github: string | undefined, release: Release): string | und
 		: `${base}/compare/${encodeURIComponent(release.previousTag)}...${encodeURIComponent(release.tag)}`
 }
 
-/** Insert new sections and update only the draft and its comparison link. */
+/** Insert new sections and update the header, draft, and draft comparison link. */
 export function updateMarkdown(
 	original: string | undefined,
 	entries: SectionEntry[],
@@ -328,7 +329,10 @@ export function updateMarkdown(
 	const content = original ?? changelogHeader
 	const parsed = parseChangelog(content)
 	const { newline } = parsed
-	const header = addNodeNote(parsed.header, newline, nodeException)
+	const header = addHeaderNotes(parsed.header, newline, nodeException)
+	if (entries.length === 0) {
+		return header + content.slice(parsed.header.length)
+	}
 
 	const additions: Array<{ text: string; version: string }> = []
 	const definitions: string[] = []
@@ -385,10 +389,6 @@ export function updateMarkdown(
 		}
 	}
 
-	if (entries.length === 0 && header === parsed.header) {
-		return content
-	}
-
 	// A promoted draft leaves its comparison link without a heading to use it.
 	if (draftText === '') {
 		footer = footer.replace(UNRELEASED_REFERENCE, '')
@@ -426,22 +426,38 @@ function appendDefinitions(
 	return separated + definitions.join(newline) + newline
 }
 
-function addNodeNote(header: string, newline: string, nodeException: boolean): string {
-	if (nodeException && !header.includes(nodeExceptionNote)) {
-		const semverLine = SEMVER_LINE.exec(header)
-		if (semverLine) {
-			const index = semverLine.index + semverLine[0].length
-			header =
-				header.slice(0, index).trimEnd() +
-				newline +
-				newline +
-				nodeExceptionNote +
-				newline +
-				header.slice(index)
-		}
+function addHeaderNotes(header: string, newline: string, nodeException: boolean): string {
+	const semverLine = SEMVER_LINE.exec(header)
+	if (semverLine === null) {
+		return header
 	}
 
-	return header
+	const notes = []
+	if (nodeException && !header.includes(nodeExceptionNote)) {
+		notes.push(nodeExceptionNote)
+	}
+
+	if (!header.replaceAll(WHITESPACE, ' ').includes(attribution)) {
+		notes.push(attribution)
+	}
+
+	if (notes.length === 0) {
+		return header
+	}
+
+	const semverEnd = semverLine.index + semverLine[0].length
+	const nodeNoteStart = header.indexOf(nodeExceptionNote, semverEnd)
+	const insertAt = nodeNoteStart === -1 ? semverEnd : nodeNoteStart + nodeExceptionNote.length
+	const rest = header.slice(insertAt)
+	const paragraphBreak = newline + newline
+	const separator = rest === newline || rest.startsWith(paragraphBreak) ? '' : newline
+	return (
+		header.slice(0, insertAt).trimEnd() +
+		paragraphBreak +
+		notes.join(paragraphBreak) +
+		separator +
+		rest
+	)
 }
 
 /**
