@@ -165,6 +165,8 @@ Use `createBumppHook()` in your bumpp configuration to include the changelogs in
 
 Git tags tell chagent where each release begins and ends. The selected agent reads the commits and files in that range and proposes entries. Chagent checks their source references and writes the Markdown. See [how generation works](docs/generation.md) for release detection, categories, caching, and formatting.
 
+Why default to `changelog.md` and not `CHANGELOG.md`? Because there's no need to yell.
+
 ## The future
 
 Possible additions include CI integration and dropping the agent CLI dependency.
